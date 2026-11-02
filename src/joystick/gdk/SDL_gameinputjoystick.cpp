@@ -327,6 +327,15 @@ static void GAMEINPUT_InternalAddOrFind(IGameInputDevice *pDevice)
     product = info->productId;
 #endif
 
+#if defined(SDL_PLATFORM_WIN32) && defined(SDL_JOYSTICK_XINPUT)
+    // KP70C's XInput identity is needed to bind its separate vendor haptics
+    // interface. GameInput can claim this receiver without exposing a gamepad.
+    // Leave this specific device to the Windows input backends.
+    if (vendor == 0x20bc && (product == 0x5173 || product == 0x5174)) {
+        goto done;
+    }
+#endif
+
     if (false /*info->capabilities & GameInputDeviceCapabilityWireless*/) {
         bus = SDL_HARDWARE_BUS_BLUETOOTH;
     } else {

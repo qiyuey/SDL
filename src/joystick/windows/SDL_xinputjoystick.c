@@ -145,6 +145,14 @@ static void AddXInputDevice(Uint8 userid, BYTE SubType, JoyStick_DeviceData **pC
     JoyStick_DeviceData *pPrevJoystick = NULL;
     JoyStick_DeviceData *pNewJoystick = *pContext;
 
+    if (SDL_UsingGameInputForXInputControllers()) {
+        // Keep KP70C on XInput so its input and vendor haptics identity stay usable.
+        GetXInputDeviceInfo(userid, &vendor, &product, &version);
+        if (vendor != 0x20bc || (product != 0x5173 && product != 0x5174)) {
+            return;
+        }
+    }
+
     if (SubType == XINPUT_DEVSUBTYPE_UNKNOWN) {
         return;
     }
@@ -280,8 +288,7 @@ static bool XINPUT_JoystickInit(void)
 {
     bool enabled = true;
 
-    if (!SDL_GetHintBoolean(SDL_HINT_XINPUT_ENABLED, true) ||
-        SDL_UsingGameInputForXInputControllers()) {
+    if (!SDL_GetHintBoolean(SDL_HINT_XINPUT_ENABLED, true)) {
         enabled = false;
     }
 

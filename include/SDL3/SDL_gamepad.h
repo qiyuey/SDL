@@ -1588,6 +1588,83 @@ extern SDL_DECLSPEC bool SDLCALL SDL_GetGamepadCapSense(SDL_Gamepad *gamepad, SD
  */
 extern SDL_DECLSPEC bool SDLCALL SDL_RumbleGamepad(SDL_Gamepad *gamepad, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms);
 
+extern SDL_DECLSPEC bool SDLCALL SDL_RumbleGamepadFrequenciesEx(SDL_Gamepad *gamepad,
+                                                               float left_low_amplitude, float left_low_frequency,
+                                                               float left_high_amplitude, float left_high_frequency,
+                                                               float right_low_amplitude, float right_low_frequency,
+                                                               float right_high_amplitude, float right_high_frequency,
+                                                               Uint32 duration_ms);
+
+/* Local extension for the Betop KP70C wired/receiver vendor HID interface.
+ * These are actuator effects, not a representation of Switch HD rumble.
+ * Index 0 is left and index 1 is right. Reserved/unused parameters must be zero.
+ */
+typedef enum SDL_BetopTriggerMode
+{
+    SDL_BETOP_TRIGGER_OFF = 0,
+    SDL_BETOP_TRIGGER_RESISTANCE = 1,
+    SDL_BETOP_TRIGGER_VIBRATION = 2,
+    SDL_BETOP_TRIGGER_BREAKTHROUGH = 3,
+    SDL_BETOP_TRIGGER_FOLLOW = 4 /* Packet encoding only; not physically validated. */
+} SDL_BetopTriggerMode;
+
+typedef enum SDL_BetopShoulderMode
+{
+    SDL_BETOP_SHOULDER_OFF = 0,
+    SDL_BETOP_SHOULDER_CRISP = 1, /* Presets 1-3 are not physically validated. */
+    SDL_BETOP_SHOULDER_SOFT = 2,
+    SDL_BETOP_SHOULDER_HEAVY = 3,
+    SDL_BETOP_SHOULDER_DIRECT = 4
+} SDL_BetopShoulderMode;
+
+#define SDL_BETOP_SHOULDER_DIRECT_ON 255
+
+typedef struct SDL_BetopTriggerEffect
+{
+    Uint8 mode; /* SDL_BetopTriggerMode, stored as a byte to preserve the ABI. */
+    /* Six protocol parameters, each in [0,100]. Resistance: start, strength;
+     * vibration: start, strength, initial strength, frequency;
+     * breakthrough: start, strength, range; follow: four effect parameters.
+     * All unused parameters, including optional output-position controls,
+     * must be zero in this implementation.
+     */
+    Uint8 parameters[6];
+} SDL_BetopTriggerEffect;
+
+typedef struct SDL_BetopShoulderEffect
+{
+    Uint8 preset;   /* SDL_BetopShoulderMode, stored as a byte. */
+    Uint8 strength; /* Presets 1-3: 0 low, 1 medium, 2 high.
+                    * Direct drive: only observed values 0 (off), 255 (on). */
+} SDL_BetopShoulderEffect;
+
+typedef struct SDL_BetopGamepadEffects
+{
+    SDL_BetopTriggerEffect triggers[2];
+    SDL_BetopShoulderEffect shoulders[2];
+} SDL_BetopGamepadEffects;
+
+/**
+ * Submit Betop KP70C trigger and shoulder effects with a finite lease.
+ *
+ * This local extension opens the matching physical controller's vendor HID
+ * interface. Unsupported or ambiguous devices return false. It does not change
+ * saved controller configuration. Effects expire independently of event pumping;
+ * renew a sustained effect before its lease expires. An all-zero structure stops
+ * both triggers and shoulders. This does not stop the separate grip rumble.
+ * Sustained trigger/direct-shoulder commands are periodically retransmitted
+ * while the caller renews the lease; callers must not implement device refresh
+ * by toggling modes. Success means accepted submission, not physical feedback.
+ *
+ * \param gamepad the connected KP70C gamepad.
+ * \param effects the complete desired trigger and shoulder state.
+ * \param duration_ms lease in milliseconds, from 1 to 1000 for active effects;
+ *                    zero is only valid when stopping effects.
+ * \returns true on success, or false with SDL_GetError() describing the failure.
+ * \threadsafety It is safe to call this function from any thread.
+ */
+extern SDL_DECLSPEC bool SDLCALL SDL_SetGamepadBetopEffects(SDL_Gamepad *gamepad, const SDL_BetopGamepadEffects *effects, Uint32 duration_ms);
+
 /**
  * Start a rumble effect in the gamepad's triggers.
  *

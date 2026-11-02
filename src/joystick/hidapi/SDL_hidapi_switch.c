@@ -22,6 +22,7 @@
    Code and logic contributed by Valve Corporation under the SDL zlib license.
 */
 #include "SDL_internal.h"
+#include <math.h>
 
 #ifdef SDL_JOYSTICK_HIDAPI
 
@@ -1764,6 +1765,55 @@ static bool HIDAPI_DriverSwitch_ActuallyRumbleJoystick(SDL_DriverSwitch_Context 
     return true;
 }
 
+static Uint16 HIDAPI_DriverSwitch_EncodeFrequency(float frequency)
+{
+    if (frequency <= 0.0f) {
+        return 0;
+    }
+    int encoded = (int)SDL_roundf(log2f(frequency / 10.0f) * 32.0f);
+    return (Uint16)SDL_clamp(encoded, 0, 0x1FF);
+}
+
+static bool HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx(SDL_HIDAPI_Device *device, SDL_Joystick *joystick,
+                                                             float left_low_amplitude, float left_low_frequency,
+                                                             float left_high_amplitude, float left_high_frequency,
+                                                             float right_low_amplitude, float right_low_frequency,
+                                                             float right_high_amplitude, float right_high_frequency)
+{
+    SDL_DriverSwitch_Context *ctx = (SDL_DriverSwitch_Context *)device->context;
+    if (ctx->m_bInputOnly) {
+        return SDL_Unsupported();
+    }
+
+    const Uint16 left_low_amp = (Uint16)(SDL_clamp(left_low_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+    const Uint16 left_high_amp = (Uint16)(SDL_clamp(left_high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+    const Uint16 right_low_amp = (Uint16)(SDL_clamp(right_low_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+    const Uint16 right_high_amp = (Uint16)(SDL_clamp(right_high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+    const Uint16 left_low_freq = HIDAPI_DriverSwitch_EncodeFrequency(left_low_frequency);
+    const Uint16 left_high_freq = HIDAPI_DriverSwitch_EncodeFrequency(left_high_frequency);
+    const Uint16 right_low_freq = HIDAPI_DriverSwitch_EncodeFrequency(right_low_frequency);
+    const Uint16 right_high_freq = HIDAPI_DriverSwitch_EncodeFrequency(right_high_frequency);
+
+    if (device->parent && ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConLeft) {
+        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
+                     (Uint8)left_low_freq, EncodeRumbleLowAmplitude(left_low_amp));
+        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[1]);
+        ctx->m_bRumbleActive = (left_low_amp || left_high_amp);
+    } else if (device->parent && ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
+        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[0]);
+        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
+                     (Uint8)right_low_freq, EncodeRumbleLowAmplitude(right_low_amp));
+        ctx->m_bRumbleActive = (right_low_amp || right_high_amp);
+    } else {
+        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
+                     (Uint8)left_low_freq, EncodeRumbleLowAmplitude(left_low_amp));
+        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
+                     (Uint8)right_low_freq, EncodeRumbleLowAmplitude(right_low_amp));
+        ctx->m_bRumbleActive = (left_low_amp || left_high_amp || right_low_amp || right_high_amp);
+    }
+    return WriteRumble(ctx);
+}
+
 static bool HIDAPI_DriverSwitch_SendPendingRumble(SDL_DriverSwitch_Context *ctx)
 {
     if (SDL_GetTicks() < (ctx->m_ulRumbleSent + RUMBLE_WRITE_FREQUENCY_MS)) {
@@ -2940,6 +2990,7 @@ SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverNintendoClassic = {
     .SendJoystickEffect = HIDAPI_DriverSwitch_SendJoystickEffect,
     .SetJoystickSensorsEnabled = HIDAPI_DriverSwitch_SetJoystickSensorsEnabled,
     .CloseJoystick = HIDAPI_DriverSwitch_CloseJoystick,
+    .RumbleJoystickFrequenciesEx = HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx,
 };
 
 SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverJoyCons = {
@@ -2959,6 +3010,7 @@ SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverJoyCons = {
     .SendJoystickEffect = HIDAPI_DriverSwitch_SendJoystickEffect,
     .SetJoystickSensorsEnabled = HIDAPI_DriverSwitch_SetJoystickSensorsEnabled,
     .CloseJoystick = HIDAPI_DriverSwitch_CloseJoystick,
+    .RumbleJoystickFrequenciesEx = HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx,
 };
 
 SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverSwitch = {
@@ -2978,6 +3030,7 @@ SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverSwitch = {
     .SendJoystickEffect = HIDAPI_DriverSwitch_SendJoystickEffect,
     .SetJoystickSensorsEnabled = HIDAPI_DriverSwitch_SetJoystickSensorsEnabled,
     .CloseJoystick = HIDAPI_DriverSwitch_CloseJoystick,
+    .RumbleJoystickFrequenciesEx = HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx,
 };
 
 #endif // SDL_JOYSTICK_HIDAPI_SWITCH

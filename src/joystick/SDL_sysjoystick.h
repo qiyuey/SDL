@@ -119,6 +119,7 @@ struct SDL_Joystick
     Uint16 high_frequency_rumble _guarded;
     Uint64 rumble_expiration _guarded;
     Uint64 rumble_resend _guarded;
+    bool rumble_using_frequencies _guarded;
 
     Uint16 left_trigger_rumble _guarded;
     Uint16 right_trigger_rumble _guarded;
@@ -148,6 +149,9 @@ struct SDL_Joystick
     struct SDL_JoystickDriver *driver _guarded;
 
     struct joystick_hwdata *hwdata _guarded; // Driver dependent information
+
+    struct SDL_BetopHapticsContext *betop_haptics _guarded; // Optional matched vendor interface
+    Uint64 betop_retry_at _guarded;
 
     SDL_PropertiesID props _guarded;
 
@@ -240,10 +244,24 @@ typedef struct SDL_JoystickDriver
 
     // Optional function to get the autodetected controller mapping
     bool (*GetGamepadMapping)(int device_index, SDL_GamepadMapping *out);
+    bool (*RumbleFrequenciesEx)(SDL_Joystick *joystick,
+                                float left_low_amplitude, float left_low_frequency,
+                                float left_high_amplitude, float left_high_frequency,
+                                float right_low_amplitude, float right_low_frequency,
+                                float right_high_amplitude, float right_high_frequency);
 
 } SDL_JoystickDriver;
 
+extern bool SDL_PrivateRumbleJoystickFrequenciesEx(SDL_Joystick *joystick,
+                                                    float left_low_amplitude, float left_low_frequency,
+                                                    float left_high_amplitude, float left_high_frequency,
+                                                    float right_low_amplitude, float right_low_frequency,
+                                                    float right_high_amplitude, float right_high_frequency,
+                                                    Uint32 duration_ms);
+
 // Windows and Mac OSX has a limit of MAX_DWORD / 1000, Linux kernel has a limit of 0xFFFF
+extern bool SDL_PrivateSetJoystickBetopEffects(SDL_Joystick *joystick, const SDL_BetopGamepadEffects *effects, Uint32 duration_ms);
+
 #define SDL_MAX_RUMBLE_DURATION_MS 0xFFFF
 
 /* Dualshock4 only rumbles for about 5 seconds max, resend rumble command every 2 seconds

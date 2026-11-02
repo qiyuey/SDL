@@ -27,6 +27,7 @@
 #include "SDL_gamepad_c.h"
 #include "SDL_joystick_c.h"
 #include "SDL_steam_virtual_gamepad.h"
+#include "SDL_betophaptics.h"
 
 #include "../events/SDL_events_c.h"
 #include "../video/SDL_sysvideo.h"
@@ -2248,47 +2249,185 @@ bool SDL_SetJoystickPlayerIndex(SDL_Joystick *joystick, int player_index)
 
 bool SDL_RumbleJoystick(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms)
 {
-    bool result;
+	bool result;
 
+	SDL_LockJoysticks();
+	{
+		CHECK_JOYSTICK_MAGIC(joystick, false);
+
+		if (joystick->betop_haptics) {
+			result = SDL_BetopHapticsRumble(joystick->betop_haptics,
+				low_frequency_rumble / 65535.0f, 0, high_frequency_rumble / 65535.0f, 0, duration_ms);
+			if (!result) {
+				SDL_BetopHapticsClose(joystick->betop_haptics);
+				joystick->betop_haptics = NULL;
+				joystick->betop_retry_at = SDL_GetTicks() + 1000;
+				SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "SDL.gamepad.betop.haptics", false);
+			}
+			SDL_UnlockJoysticks();
+			return result;
+		}
+
+		if (low_frequency_rumble == joystick->low_frequency_rumble &&
+			high_frequency_rumble == joystick->high_frequency_rumble && !joystick->rumble_using_frequencies) {
+			result = true;
+		} else if (joystick->driver->Rumble) {
+			result = joystick->driver->Rumble(joystick, low_frequency_rumble, high_frequency_rumble);
+			if (result) {
+				joystick->rumble_resend = SDL_GetTicks() + SDL_RUMBLE_RESEND_MS;
+				if (joystick->rumble_resend == 0) {
+					joystick->rumble_resend = 1;
+				}
+			} else {
+				joystick->rumble_resend = 0;
+			}
+		} else {
+			result = SDL_Unsupported();
+		}
+
+		if (result) {
+			joystick->rumble_using_frequencies = false;
+			joystick->low_frequency_rumble = low_frequency_rumble;
+			joystick->high_frequency_rumble = high_frequency_rumble;
+			if ((low_frequency_rumble || high_frequency_rumble) && duration_ms) {
+				joystick->rumble_expiration = SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS);
+				if (!joystick->rumble_expiration) {
+					joystick->rumble_expiration = 1;
+				}
+			} else {
+				joystick->rumble_expiration = 0;
+				joystick->rumble_resend = 0;
+			}
+		}
+	}
+	SDL_UnlockJoysticks();
+
+	return result;
+}
+
+bool SDL_PrivateRumbleJoystickFrequenciesEx(SDL_Joystick *joystick,
+                                            float left_low_amplitude, float left_low_frequency,
+                                            float left_high_amplitude, float left_high_frequency,
+                                            float right_low_amplitude, float right_low_frequency,
+                                            float right_high_amplitude, float right_high_frequency,
+                                            Uint32 duration_ms)
+{
+    bool result = false;
+    if (!(left_low_amplitude >= 0 && left_low_amplitude <= 1) ||
+        !(left_high_amplitude >= 0 && left_high_amplitude <= 1) ||
+        !(right_low_amplitude >= 0 && right_low_amplitude <= 1) ||
+        !(right_high_amplitude >= 0 && right_high_amplitude <= 1) ||
+        !(left_low_frequency >= 0 && left_low_frequency <= SDL_MAX_SINT32) ||
+        !(left_high_frequency >= 0 && left_high_frequency <= SDL_MAX_SINT32) ||
+        !(right_low_frequency >= 0 && right_low_frequency <= SDL_MAX_SINT32) ||
+        !(right_high_frequency >= 0 && right_high_frequency <= SDL_MAX_SINT32)) {
+        return SDL_SetError("Rumble amplitudes must be finite in [0,1] and frequencies finite and nonnegative");
+    }
     SDL_LockJoysticks();
     {
         CHECK_JOYSTICK_MAGIC(joystick, false);
-
-        if (low_frequency_rumble == joystick->low_frequency_rumble &&
-            high_frequency_rumble == joystick->high_frequency_rumble) {
-            // Just update the expiration
-            result = true;
-        } else if (joystick->driver->Rumble) {
-            result = joystick->driver->Rumble(joystick, low_frequency_rumble, high_frequency_rumble);
-            if (result) {
-                joystick->rumble_resend = SDL_GetTicks() + SDL_RUMBLE_RESEND_MS;
-                if (joystick->rumble_resend == 0) {
-                    joystick->rumble_resend = 1;
+        if (!joystick->attached) {
+            SDL_UnlockJoysticks();
+            return SDL_SetError("Gamepad is disconnected");
+        }
+        if (SDL_BetopHapticsIsSupported(joystick) && !joystick->betop_haptics &&
+            (left_low_amplitude > 0 || left_high_amplitude > 0 ||
+             right_low_amplitude > 0 || right_high_amplitude > 0) &&
+            SDL_GetTicks() >= joystick->betop_retry_at) {
+            joystick->betop_haptics = SDL_BetopHapticsOpen(joystick);
+            joystick->betop_retry_at = SDL_GetTicks() + 1000;
+            if (joystick->betop_haptics) {
+                // Do not let a previous ordinary-rumble lease overwrite vendor output.
+                if (joystick->driver->Rumble) {
+                    joystick->driver->Rumble(joystick, 0, 0);
                 }
-            } else {
-                joystick->rumble_resend = 0;
+                joystick->rumble_expiration = joystick->rumble_resend = 0;
+                joystick->low_frequency_rumble = joystick->high_frequency_rumble = 0;
+                joystick->rumble_using_frequencies = false;
+                SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "SDL.gamepad.betop.haptics", true);
             }
+        }
+        if (joystick->betop_haptics) {
+            result = SDL_BetopHapticsRumble(joystick->betop_haptics,
+                left_low_amplitude, left_high_amplitude, right_low_amplitude, right_high_amplitude, duration_ms);
+            if (!result) {
+                SDL_BetopHapticsClose(joystick->betop_haptics);
+                joystick->betop_haptics = NULL;
+                joystick->betop_retry_at = SDL_GetTicks() + 1000;
+                SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "SDL.gamepad.betop.haptics", false);
+            }
+            SDL_UnlockJoysticks();
+            return result;
+        }
+        if (joystick->driver->RumbleFrequenciesEx) {
+            result = joystick->driver->RumbleFrequenciesEx(joystick,
+                                                            left_low_amplitude, left_low_frequency,
+                                                            left_high_amplitude, left_high_frequency,
+                                                            right_low_amplitude, right_low_frequency,
+                                                            right_high_amplitude, right_high_frequency);
+        } else if (joystick->driver->Rumble) {
+            const bool left_low = left_low_amplitude >= right_low_amplitude;
+            const bool left_high = left_high_amplitude >= right_high_amplitude;
+            const float low_amplitude = left_low ? left_low_amplitude : right_low_amplitude;
+            const float high_amplitude = left_high ? left_high_amplitude : right_high_amplitude;
+            const Uint16 low = (Uint16)(SDL_clamp(low_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+            const Uint16 high = (Uint16)(SDL_clamp(high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+            result = joystick->driver->Rumble(joystick, low, high);
         } else {
             result = SDL_Unsupported();
         }
-
         if (result) {
-            joystick->low_frequency_rumble = low_frequency_rumble;
-            joystick->high_frequency_rumble = high_frequency_rumble;
-
-            if ((low_frequency_rumble || high_frequency_rumble) && duration_ms) {
-                joystick->rumble_expiration = SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS);
-                if (!joystick->rumble_expiration) {
-                    joystick->rumble_expiration = 1;
-                }
-            } else {
-                joystick->rumble_expiration = 0;
-                joystick->rumble_resend = 0;
-            }
+            // Keep the ordinary stop path aware that the frequency API started motors.
+            joystick->rumble_using_frequencies = true;
+            joystick->low_frequency_rumble = (Uint16)(SDL_clamp(SDL_max(left_low_amplitude, right_low_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16);
+            joystick->high_frequency_rumble = (Uint16)(SDL_clamp(SDL_max(left_high_amplitude, right_high_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16);
+            joystick->rumble_expiration = duration_ms ? SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS) : 0;
+            joystick->rumble_resend = 0;
         }
     }
     SDL_UnlockJoysticks();
+    return result;
+}
 
+bool SDL_PrivateSetJoystickBetopEffects(SDL_Joystick *joystick, const SDL_BetopGamepadEffects *effects, Uint32 duration_ms)
+{
+    bool result;
+    Uint8 packets[4][64];
+    if (!SDL_BetopHapticsEncodeEffects(packets, effects)) {
+        return false;
+    }
+    if ((effects->triggers[0].mode || effects->triggers[1].mode ||
+         (effects->shoulders[0].preset == 4 ? effects->shoulders[0].strength : effects->shoulders[0].preset) ||
+         (effects->shoulders[1].preset == 4 ? effects->shoulders[1].strength : effects->shoulders[1].preset)) &&
+        (!duration_ms || duration_ms > 1000)) {
+        return SDL_SetError("Active Betop effects require a lease from 1 to 1000 ms");
+    }
+    SDL_LockJoysticks();
+    CHECK_JOYSTICK_MAGIC(joystick, false);
+    if (!joystick->attached) {
+        SDL_UnlockJoysticks();
+        return SDL_SetError("Gamepad is disconnected");
+    }
+    if (!joystick->betop_haptics) {
+        joystick->betop_haptics = SDL_BetopHapticsOpen(joystick);
+        if (joystick->betop_haptics) {
+            if (joystick->driver->Rumble) {
+                joystick->driver->Rumble(joystick, 0, 0);
+            }
+            joystick->rumble_expiration = joystick->rumble_resend = 0;
+            joystick->low_frequency_rumble = joystick->high_frequency_rumble = 0;
+            joystick->rumble_using_frequencies = false;
+            SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "SDL.gamepad.betop.haptics", true);
+        }
+    }
+    result = joystick->betop_haptics && SDL_BetopHapticsSetEffects(joystick->betop_haptics, effects, duration_ms);
+    if (!result && joystick->betop_haptics) {
+        SDL_BetopHapticsClose(joystick->betop_haptics);
+        joystick->betop_haptics = NULL;
+        joystick->betop_retry_at = SDL_GetTicks() + 1000;
+        SDL_SetBooleanProperty(SDL_GetJoystickProperties(joystick), "SDL.gamepad.betop.haptics", false);
+    }
+    SDL_UnlockJoysticks();
     return result;
 }
 
@@ -2417,6 +2556,8 @@ void SDL_CloseJoystick(SDL_Joystick *joystick)
 
         CleanupSensorFusion(joystick);
 
+        SDL_BetopHapticsClose(joystick->betop_haptics);
+        joystick->betop_haptics = NULL;
         joystick->driver->Close(joystick);
         joystick->hwdata = NULL;
         SDL_SetObjectValid(joystick, SDL_OBJECT_TYPE_JOYSTICK, false);
@@ -2720,6 +2861,8 @@ void SDL_PrivateJoystickRemoved(SDL_JoystickID instance_id)
     for (joystick = SDL_joysticks; joystick; joystick = joystick->next) {
         if (joystick->instance_id == instance_id) {
             SDL_PrivateJoystickForceRecentering(joystick);
+            SDL_BetopHapticsClose(joystick->betop_haptics);
+            joystick->betop_haptics = NULL;
             joystick->attached = false;
             break;
         }

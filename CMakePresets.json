@@ -1,0 +1,41 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-x64-release",
+      "displayName": "Windows x64 Release",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows-x64-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SDL_SHARED": "ON",
+        "SDL_STATIC": "OFF",
+        "SDL_TESTS": "OFF",
+        "SDL_EXAMPLES": "OFF",
+        "SDL_INSTALL_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "windows-x64-tests",
+      "displayName": "Windows x64 SDL tests",
+      "inherits": "windows-x64-release",
+      "binaryDir": "${sourceDir}/build/windows-x64-tests",
+      "cacheVariables": {
+        "SDL_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-x64-release",
+      "configurePreset": "windows-x64-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-x64-tests",
+      "configurePreset": "windows-x64-tests",
+      "configuration": "Release"
+    }
+  ]
+}
