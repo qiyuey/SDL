@@ -110,7 +110,6 @@ class Output:
             error = bind('SDL_GetError', C.c_char_p, [])
             hint = bind('SDL_SetHint', C.c_bool, [C.c_char_p, C.c_char_p])
             hint(b'SDL_JOYSTICK_HIDAPI_SWITCH2_EXPERIMENTAL_HD', b'1')
-            hint(b'SDL_JOYSTICK_HIDAPI_SWITCH2_HD_GAIN', b'1')
             hint(b'SDL_HIDAPI_IGNORE_DEVICES', b'0x057e/0x2009')
             init = bind('SDL_Init', C.c_bool, [C.c_uint32])
             get = bind('SDL_GetGamepads', C.POINTER(C.c_uint32), [C.POINTER(C.c_int)])

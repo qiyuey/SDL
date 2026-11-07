@@ -2,6 +2,14 @@
 
 记录日期：2026-11-05（Asia/Shanghai）。本文是本地适配研究记录，不是已完成的驱动规格。
 
+## 2026-11-06 强度接口更新
+
+强度只在应用层缩放一次：Switch 内容 100%=5×，Switch 2 内容 100%=1×。
+SDL3 的频率 API 接收最终的 0–1 振幅，不推断游戏类型，也不再次放大。
+`SDL_JOYSTICK_HIDAPI_SWITCH2_HD_GAIN` 已停止读取；下文关于该增益的记录属于历史实验。
+公共 API 签名、频率编码候选公式与输出调度不变。原生 HD Rumble 2 模式仍等待 Switch 2 HID 模块。
+本次仅修改源码，未编译或部署 DLL。详见 [强度约定](README-rumble-strength.md)。
+
 ## 目标与当前结论
 
 目标是让游戏经自定义 SDL3 向 Switch 2 Pro 输出左右独立的低频频率、低频振幅、高频频率、高频振幅，以及正确的更新、持续和停止行为。当前先完成 USB；蓝牙另需 BLE 连接支持。
@@ -253,3 +261,379 @@ libusb-1.0.dll
 输入0.025/0.06751/0.11251/0.125，在强档g=8时约输出0.170/0.367/0.504/0.533。没有按每项效果分别归一化。GUI显示原始与输出曲线、峰值；切换停止，点击播放才输出。增强仅对Switch 2 Pro开放，尚未改成游戏默认，也未改动SDL DLL。
 
 实现：../SavageWindRecomp/tools/rumble_amplitude_mapping.py 与 rumble_catalog_player.py。四项离线测试、76项效果的四档映射校验及200% DPI界面检查通过，未输出实际震动。下一步实物比较小、中、大、持续小震动的轻重层次和收尾。只有Switch 2 Pro时可确定偏好及可感阈值，不能宣称已复现原装HD1。频率相关补偿还需测量，不从160 Hz推广到所有频率。
+
+
+## 2026-11-06: Switch 2 Pro 4 ms scheduling source changes
+
+The upstream generic HIDAPI rumble worker's post-write `SDL_Delay(10)` originated
+in commit `480c1f9fef73dece0ead7c95a60dcb67ec4e7ce7` (2021-01-01), described as
+avoiding starvation of report reads. The Switch 2 driver's separate 12 ms
+constant originated in `c89fed4eae488ae5f953b722facb576a22719485`. Neither commit
+establishes a hardware minimum output period.
+
+The locally attached 057E:2069 controller's read-only descriptors showed a
+full-speed HID interrupt OUT endpoint 0x01 with bInterval 4 and packet size64.
+That descriptor is a USB scheduling fact, not proof of the actuator's achievable
+parameter update rate. No output transfer was sent during descriptor inspection.
+
+The source now selects a shared 4 ms target for Switch 2 Pro driver gating and
+worker start-to-start pacing. The worker subtracts the synchronous write time
+from its remaining wait, rather than appending another4 ms after writing.
+Other controller drivers retain their legacy pacing. Matching unsent states for
+one device/report are replaced in place, without allocating more queue slots or
+incrementing the semaphore. A stop replaces that device's waiting state and
+moves it ahead of other waiting requests; an already executing write cannot be
+preempted. Existing callbacks are not overwritten.
+
+`SDL_JOYSTICK_HIDAPI_RUMBLE_TRACE=1` enables fast-path diagnostics containing
+write start time, age of the latest queued state, write duration, requested size
+and actual hid_write return value. Enqueue success alone is not USB delivery.
+This patch does not add transport retries or claim successful hardware writes.
+
+The offline specification model covered10000 state replacements, stop priority,
+and10000 randomized queue operations. It demonstrates bounded latest-state
+storage and the intended timing arithmetic; it does not execute the C worker.
+No compilation, DLL deployment, emulator UI action or physical rumble was
+performed. The deployed DLL still uses the previous scheduling until this source
+is compiled and explicitly deployed. USB write latency, input-report continuity,
+queue age, stop latency and physical effects remain hardware acceptance items.
+Multiple active controllers share a worker, and a write taking over4 ms cannot
+sustain a4 ms start-to-start period.
+
+
+### 4 ms DLL build and GUI deployment
+
+The 4 ms scheduling source was subsequently compiled successfully on Windows.
+The new SDL3.dll SHA-256 is
+`1311659FE8C8C903152B050BF81E971F31A6FDC13D7ADAA43D31123368E7C972`.
+Copies were deployed to SavageWindRecomp/build and Lichii/build/bin, with the
+previous98ED92DDB23E DLL kept as a local backup in each destination.
+
+The134 virtual API checks and the standalone frequency/field codec checks passed.
+A harness compiled from the actual rumble worker C source with mocked hid_write
+also passed10000-update coalescing and stop-priority/order checks. With no USB
+write cost it observed31 start intervals: mean4.422 ms, min4.020 ms, max4.526 ms.
+Those values measure the mock worker and OS scheduling, not physical USB output.
+
+The old command-line replay script and Replay-HD1-Effects.cmd launcher have
+been removed. The retained interactive player is SavageWindRecomp/tools/
+rumble_catalog_player.py, titled "旷野之息 · 原生震动目录与回测". Its extracted catalog
+and recorded results remain local ignored data. Physical playback requires the
+user to select an effect and press Play.
+
+## 2026-11-06: synchronous-wait decomposition and bounded asynchronous OUT
+
+This experiment uses independently built `test/testswitch2transport.cpp`, not a
+replacement runtime DLL. It initializes the attached USB 057e:2069 with the
+existing SDL driver, then sends only synthetic, mirrored 160/320 Hz packets:
+low amplitude 0.02..0.05 and high amplitude 0.02. Report ID is 2, packet size 64;
+Windows HID capabilities confirmed a 64-byte numbered output report. Raw game
+resources, firmware and saves are not used.
+
+Four 0.8-second comparisons were captured with UCX and USBXHCI ETW providers:
+
+| Transport | Maximum in flight | Active successful requests | Kernel completion spacing, mean | Submission-to-user-completion, mean |
+| --- | ---: | ---: | ---: | ---: |
+| Native Windows overlapped HID | 1 | 100 | 8.0006 ms | 7.0005 ms |
+| Native Windows overlapped HID | 2 | 200 | 3.9968 ms | 5.0008 ms |
+| libusb asynchronous interrupt OUT | 1 | 100 | 8.0001 ms | 7.4900 ms |
+| libusb asynchronous interrupt OUT | 2 | 200 | 3.9970 ms | 4.9336 ms |
+
+All requests in these comparisons succeeded with 64 bytes. The tested endpoint
+was verified in the kernel rundown as interrupt OUT 0x01, max packet size 64 and
+bInterval 4. The analyzer identifies the 057e:2069 device in rundown, filters its
+OUT endpoint, pairs dispatch/completion by IRP+URB, and matches these with probe
+submission timestamps. It does not include other USB peripherals in statistics.
+Raw ETL/XML and local timing logs stay in ignored build output.
+
+For the libusb single-request run, the mean 7.4900 ms divided as follows:
+
+- User submission to UCX dispatch: 0.0056 ms.
+- UCX dispatch to kernel completion: 7.4718 ms.
+- Kernel completion to libusb callback: 0.0126 ms.
+
+Thus most of the wait is below the user-mode completion loop, not callback
+processing. UCX timing includes kernel queueing, host scheduling and device
+response; it does not independently separate those or reveal link-level NAKs.
+The original Lichii/SDL synchronous path was also replayed under ETW. Its longest
+continuous group had 104 OUT requests: mean kernel residence 7.6153 ms and mean
+completion spacing 8.0004 ms. This reproduces the original observation without
+assuming `hid_write` duration is physical wire transmission time.
+
+With two libusb requests in flight, a further 3-second run completed 750 active
+requests without failure or coalescing. Across 749 intervals, kernel completion
+spacing averaged 3.99979 ms, min 3.7292, max 4.0121 ms. This establishes approximately
+250 successful host USB request completions/second for this setup. It does not
+establish 4 ms end-to-end effect latency: an individual request still took about
+5 ms, and actuator onset/frequency/force were not measured. The result rules out
+an unconditional 125 Hz transport ceiling for this controller/setup.
+
+### Stop, cancellation and connection scope
+
+The experiment keeps at most two fixed buffers in flight. At Stop it ceases
+active publication, requests cancellation, drains all callbacks, then submits
+one zero-amplitude stereo report. Buffer/OVERLAPPED/transfer storage is retained
+until completion even when cancellation races normal completion. There is no
+unbounded FIFO and no active submission after Stop. A transport error also causes
+publication to cease; after draining, silence is attempted because a timeout is
+not proof of disconnect.
+
+Normal stop request-to-successful-completion measurements were 4.97..9.00 ms.
+A separate full-pipeline test deliberately submitted two requests immediately
+before Stop. Native HID returned two ERROR_OPERATION_ABORTED completions;
+libusb returned two LIBUSB_TRANSFER_CANCELLED completions. The subsequent
+64-byte zero-amplitude reports succeeded, after 3.491 ms (native) and 3.936 ms
+(libusb) from the stop request. No active callback followed the successful stop,
+and both tests closed with zero in-flight requests. These are software/transport
+stop checks, not human confirmation of actuator silence.
+
+Physical unplug/replug was not performed: the user explicitly said it was not
+convenient at this time. Real NO_DEVICE handling, reconnect behaviour and human
+stop acceptance therefore remain pending. Cancellation/drain/close success must
+not be reported as physical-disconnect verification.
+
+### Reproduction and deployment boundary
+
+Build the Windows-only probe from a Visual Studio x64 Developer PowerShell:
+
+```powershell
+cl /nologo /std:c++20 /EHsc /O2 /W4 /I include /I build/deps/libusb-1.0.30/include test/testswitch2transport.cpp /Febuild/rumble-transport-probe/testswitch2transport.exe /Fobuild/rumble-transport-probe/testswitch2transport.obj /link build/windows-x64-release/Release/SDL3.lib build/deps/libusb-1.0.30/VS2022/MS64/dll/libusb-1.0.lib hid.lib setupapi.lib
+```
+
+Place the matching SDL3/libusb DLLs beside the probe. `--self-test` checks bounded
+packet amplitudes, stereo silence, sequence wrap and Windows report-ID layout
+without opening a controller. Physical runs require `native1`, `native2`, `usb1`
+or `usb2`, followed by explicit `--play`; optional `--long`, `--cancel-stop` or
+`--disconnect` selects a three-second run, full-pipeline stop test or a ten-second
+manual-unplug window. Redirect stdout/stderr to local JSONL. On a live transport,
+normal and cancellation tests request silence before closing.
+
+`test/analyze_switch2_transport.py` consumes those JSONL files and tracerpt XML.
+Pass the XML wall-clock offset explicitly; this host's tracerpt incorrectly
+printed a +07:59 suffix for the actual UTC+08 wall clock. The analysis used 480
+minutes, validated by sub-millisecond matching against QPC/FILETIME anchors.
+Unmatched traces or lost ETW events are rejected rather than silently pooled.
+
+The libusb experiment releases the SDL handles after initialization before
+opening its own handle/context: retaining SDL's claimed WinUSB interface prevented
+a second composite-device open. A production implementation must instead use
+the existing SDL-owned handle/context and integrate completion/cancellation with
+its lifetime. It must preserve sensor/input processing and bounded stop ordering.
+No application DLL was replaced and neither game was launched for this experiment.
+Do not infer that BOTW or Lichii already uses this two-request USB path.
+
+
+## 2026-11-06: production Windows two-in-flight transport
+
+Windows USB Switch 2 Pro now uses the ordered asynchronous transport in
+`src/joystick/hidapi/SDL_switch2_rumble_async.h`, called from the existing
+Switch 2 driver. It borrows the existing HIDAPI libusb handle/context and uses
+its existing event thread; it neither reopens the device nor replaces a driver.
+Only the HID interface associated with that device is used to select its
+64-byte interrupt OUT endpoint. Other controllers and other host platforms
+retain their existing output paths. Public API signatures and gain are unchanged.
+
+The transport has one submitting thread, two immutable in-flight buffers and
+one replaceable pending active state. Actual submissions receive consecutive
+64-bit ordinals and firmware sequence values modulo 16. Completed slots retire
+strictly in submission order, even when callbacks arrive out of order. An older
+failed packet is never retried behind a newer packet: the endpoint is first
+cancelled/drained, then only current state may be retried. There is no unbounded
+output FIFO. Faster intermediate active changes can still coalesce.
+
+Stop is a latched barrier: it discards unsent old active state, cancels/drains
+both in-flight writes, sends zero amplitude on both sides and waits for success
+before releasing newer active output. Cancellation racing normal completion is
+accepted; buffers and transfers are retained until callback processing finishes.
+Short or failed stop writes retry while new active output stays held. Close
+pauses the transport and drains it before releasing the borrowed handle. Read
+errors, NO_DEVICE callbacks and immediate NO_DEVICE submission failures permanently
+reject further output for that device lifetime; reopen cannot replay cached state.
+A fresh reconnected device receives a fresh transport. A close-time stop failure
+has a one-second acceptance deadline, followed by cancellation/drain before free.
+A disconnected controller cannot acknowledge silence; physical motor silence is
+not guaranteed by this software mechanism alone.
+
+The driver no longer adds a second millisecond gate in front of this worker.
+Actual submissions use a monotonic 4 ms minimum interval and SDL_DelayPrecise;
+auto-reset wake events handle idle/callback notification. A timed wait is bounded
+by one period, so a newly arriving stop can wait up to 4 ms for this worker before
+the cancellation barrier begins. Precise waiting may use short CPU spinning,
+as documented for SDL's precise timer API.
+
+Validation of the final build:
+
+- CTest `testswitch2async` executes this exact production header with fake libusb,
+  no enumeration or physical output. It passed 10,000 replacements, immutable
+  buffers, reversed callbacks/FIFO retirement, both cancellation and delayed
+  cancellation, stop-before-new-effect, failed/short stop retry, stale-packet
+  suppression, NO_DEVICE from callbacks/submission, input-side disconnect
+  notification and fresh-lifetime cleanup. Release assertions remain enabled.
+- All 134 virtual haptics API checks and all 1024 frequency/field codec checks
+  passed. The existing generic C rumble-worker harness also passed its 10,000
+  replacement and stop-order checks, confirming the other-controller queue path.
+- The final DLL's public API test sent 502 requests with zero API failures on
+  Windows/USB 057e:2069. It covered two seconds of changing stereo output, stop,
+  close, silent reopen and close during active output. Gyro and acceleration were
+  enabled; 998 combined sensor events arrived during the two-second active phase.
+- ETW matched all 498 submissions to the selected controller's kernel OUT requests,
+  with zero lost ETW events. Ordinals/firmware sequences were ordered and at most
+  two requests were in flight. All successful stop writes followed drainage of
+  older callbacks, and no stale active report appeared during reopen.
+- In the final public-API run, the main continuous phase had 490 successful active
+  requests: 489 kernel completion intervals averaged 4.07785 ms, min 1.9901 ms,
+  max 8.0046 ms. An earlier candidate measured 4.02163 ms. Host scheduling and
+  completion batching cause jitter; this is approximately 4 ms throughput, not a
+  guarantee of an exact 4 ms bus interval, zero loss of intermediate states, or
+  4 ms actuator latency. No physical frequency/force calibration was performed.
+- Deployed application harnesses also passed: BOTW's actual runtime worker and
+  Lichii's actual SDLDriver, each using its adjacent updated DLL. Traces matched
+  245 and 203 submissions respectively, verified FIFO/sequence order and final
+  silence. Their longest steady completion samples averaged 4.09940 and 4.07566 ms.
+- BOTW vibration, input-focus, Betop state/effect and PC-control regression targets
+  passed. Its stereo worker test was corrected to wait for observed completion
+  and renew the foreground heartbeat instead of assuming an 8 ms sleep suffices.
+  Lichii's nine vibration test cases and mailbox regression passed with the new
+  DLL. No emulator/game or private save was opened.
+
+Actual physical unplug/replug and subjective stop/feel remain untested because
+the user said physical unplug was inconvenient. The NO_DEVICE/disconnect paths
+above are simulated regression coverage, not a physical-unplug claim.
+
+Final SDL3.dll SHA-256: `33BCE43468DA37B645EE3CB6FFD64A01BF0A03D31AD74FD7E4686AF539ECC2BD`.
+Copies were verified in SavageWindRecomp/build, Lichii/build/bin and
+Lichii/build/windows-msvc/bin. Prior DLLs were retained as local
+`SDL3-before-async2-<hash-prefix>.dll` backups. libusb-1.0.dll is unchanged.
+Local deployment and timing reports live in ignored build/rumble-async-test.
+`test/analyze_switch2_async.py` reproduces FIFO, stop-drain and kernel-trace checks.
+
+
+## 2026-11-06: current event-driven output across all three applications
+
+This supersedes the software-periodic production scheduling above. The physical
+controller's full-speed interrupt OUT descriptor advertises bInterval=4; that is
+not a requirement to sleep four milliseconds before submitting a fresh value.
+New frequency/amplitude states now publish immediately from an application owner
+and enter libusb immediately whenever a slot is available. At most two complete
+stereo reports are in flight, plus one replaceable pending state. Each report
+contains both frequency/amplitude components for both sides: slots are requests,
+not actuator channels. Input/expiry polling remains timed; healthy fresh output
+has no four-millisecond gate at either application or SDL level.
+
+The Pro driver's public rumble entry points now enqueue asynchronous output
+immediately instead of waiting for the next input/device update. Repeated byte-
+identical states are deduplicated; unchanged keepalive uses the original driver's
+12 ms policy. Retry backoff remains four milliseconds. The serialized submitter,
+firmware counters, FIFO retirement, Stop/cancel/drain/zero barrier and NO_DEVICE
+handling are unchanged and passed their production-code mock regressions.
+
+The earlier recurring 8 ms gaps had two software contributors. Relative
+actual-send+4ms deadlines accumulated wake lateness; SDL_DelayPrecise also always
+attempts an OS sleep, even for a tiny final tail, which could add roughly 0.5 ms
+on this host. Data was already pending in all ten identified baseline gaps from
+the two-second reference. Removing the healthy software gate avoids both waits,
+rather than trying to maintain a second clock in front of the USB host scheduler.
+A residual during an intermediate fixed-phase experiment was separately traced
+to a publisher delivering new data about 0.333 ms late; SDL forwarded it within
+about 1 microsecond. An asynchronous transport cannot transmit a not-yet-produced
+value. A legitimate 5 ms input can naturally occupy 4/8 ms USB service opportunities.
+
+Application changes:
+
+- BOTW: publication wakes its existing owner, with no healthy pacing gate. The
+  input/lease timeout and 100 ms foreground-heartbeat protection remain. A fresh
+  stop bypasses old active-failure backoff. The instant-backend regression forwarded
+  1 ms publications with measured mean 1.505 ms, proving no forced 4 ms delay.
+- Lichii: publication signals a coalesced semaphore notification; its owner wakes
+  immediately. The 4 ms idle timeout is only input/expiry service. Mailbox timing
+  limits now apply only to failed submissions; latest state, side-specific stops,
+  connection generations and 250/2000 ms renewal/lease behaviour remain.
+- TOTK: removed the 10 ms guest-side throttle and synchronous SDL call. A dedicated
+  owner copies raw stereo state under the guest mailbox lock, releases it before
+  device I/O, and wakes on scalar/batch publication. Batches publish atomically.
+  It preserves one-time strength, raw readback, independent 250 ms side expiry,
+  permission/focus/config stops, device epochs and bounded retry. Normal process
+  exit paths explicitly join/drain it because Windows plat_exit skips atexit.
+  The v143 executable and matching dynamic libusb dependency were rebuilt/deployed.
+
+Final event-driven hardware records (Windows USB 057e:2069, synthetic low-amplitude
+input, no game scene or private save):
+
+| Run | Input | Successful main-effect requests | Mean kernel completion gap | Maximum |
+| --- | --- | ---: | ---: | ---: |
+| Public SDL API | 500 changing updates/2 s, 4 ms | 500 | 3.99585 ms | 4.1276 ms |
+| BOTW owner | 250 changing updates/1 s, 4 ms | 250 | 3.99832 ms | 4.1189 ms |
+| Lichii owner | changing 4 ms input; startup excluded | 211 | 3.98876 ms | 4.0971 ms |
+| TOTK HLE + real input backend | 200 updates/1 s, 5 ms | 200 | 4.98508 ms | 8.0023 ms |
+
+All traces passed one-to-one user/kernel request matching, consecutive ordinals,
+modulo16 firmware sequences, at-most-two in flight, drain-before-stop and final
+silence. The 4 ms input runs had no 8 ms interval in these samples. TOTK's 4/8 ms
+gaps are expected for its deliberately 5 ms stimulus, not the removed 10 ms throttle.
+Kernel completion timing is not a link-layer ACK or actuator-onset measurement.
+Short tests do not guarantee hard real-time scheduling under all CPU/USB loads.
+
+Regression: SDL production transport CTest, 134 virtual haptics API checks and 1024
+codec values; BOTW vibration/focus/Betop/PC-control targets; Lichii's nine vibration
+cases and mailbox check; TOTK owner stall / 10,000 publications, retry, raw strength
+readback, stop/permission, per-side expiry, epochs, join tests and v143 --selftest
+all passed. Actual unplug/replug remains deferred at the user's request.
+
+Current DLL SHA-256: `8F40DCD19C88785EA07141AA28494DF14CB8B78FB3B0951B915B3EC07ECC32FF`. Copies match in BOTW/build, TOTK/build/v143 and both
+Lichii Windows output directories. No old DLL backups were recreated.
+
+## 2026-11-06: measured queue-depth selection
+
+The subsequent [one-through-four-slot comparison](README-switch2-queue-depth.md)
+keeps the default at two. Across three interleaved rounds, depths 2/3/4 each
+completed all 2250 changing 4 ms states and 1800 changing 5 ms states. The 4 ms
+segments had no approximately 8 ms completion gaps; 5 ms segments naturally had
+4/8 ms spacing. Neither workload ever occupied a third slot, even with a limit
+of 3 or 4. One slot merged 1122/2250 and 674/1800 source states respectively.
+Short-pulse and stop measurements, limitations, reproducible tooling and
+regressions are in the linked report. The comparison used an isolated diagnostic
+DLL; application DLLs retain their already-deployed two-slot default.
+
+## 2026-11-06: raw input rate after motherboard USB reconnection
+
+The [raw input capture report](README-switch2-input-rate.md) compares SDL input,
+native Windows HID and report formats 0x05/0x09, including the user's motherboard
+USB reconnection. All five captures show approximately 250 physical IN reports/s
+with 4.000 ms kernel completion spacing. In the final six-second normal window,
+1500 raw reports and 1500 physical IN completions produce 1500 gyro plus 1500
+accelerometer events; adding the two event types yields 500 events/s, not 500
+packets/s. Public Steam 500 Hz accounts and Switch2Connect's wired reader were
+investigated, but no raw-packet-verified 500 Hz procedure was reproduced. Normal
+0x05 reporting was restored after the raw-only 0x09 diagnostic contrast.
+
+## 2026-11-06: production sender finalization
+
+The selected two-request event-driven transport is deployed to BOTW/build,
+TOTK/build/v143 and both Lichii output directories with matching dynamic libusb.
+The SDK hash above is now the production-final build. Diagnostic publication IDs
+and timestamps are retained behind the existing disabled-by-default trace hint.
+The private 1..4 queue-depth override remains diagnostic; normal output uses two.
+
+Retry waiting now uses an interruptible native event timeout rather than precise
+sleep/spin. A fresh Stop, disconnect or close can wake the owner during failed-I/O
+backoff. A production-code regression inserts a one-second retry deadline and
+requires Stop to submit silence within 200 ms instead of waiting for that deadline.
+Normal changed output still has no software pacing gate. Ordered immutable
+buffers, FIFO retirement, stop/drain/zero barriers and device lifetime protection
+remain unchanged.
+
+On the final DLL, 750/750 changing 4 ms and 600/600 changing 5 ms updates completed;
+the 4 ms segment had no approximately 8 ms gaps. All 12 burst stops succeeded
+with the old callbacks drained first. Independent real-USB BOTW, Lichii and TOTK
+sender fixtures also passed ETW ordering and final-zero checks. Largest steady
+segments had completion gaps averaging 3.991/3.999/4.985 ms respectively, maximum
+4.012/4.025/8.008 ms (TOTK used a 5 ms source). Captures are ignored local artifacts
+under build/rumble-production-final, including deployment.json and per-run
+validation JSON. No actual game scene or physical unplug acceptance is claimed.
+
+Offline regression passed: production transport CTest including all four depth
+bounds and Stop interruption, 134 virtual API checks, 1024 codec values, BOTW
+vibration/worker/focus targets, Lichii nine vibration cases plus mailbox, and TOTK
+owner blocking/retry/permission/expiry/epoch/shutdown cases. Old DLL backup files
+were not recreated. Short-pulse limitations from the queue-depth report remain;
+no unrequested pulse stretching was introduced.

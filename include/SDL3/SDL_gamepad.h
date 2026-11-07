@@ -1588,6 +1588,11 @@ extern SDL_DECLSPEC bool SDLCALL SDL_GetGamepadCapSense(SDL_Gamepad *gamepad, SD
  */
 extern SDL_DECLSPEC bool SDLCALL SDL_RumbleGamepad(SDL_Gamepad *gamepad, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble, Uint32 duration_ms);
 
+/* Local extension: amplitudes are final normalized requests in [0,1], and
+ * frequencies are Hz. Apply source-specific user strength once in the caller.
+ * This API does not infer a game's generation or apply an extra gain. Backends
+ * without frequency support may fall back to ordinary rumble. API success does
+ * not confirm physical delivery or calibrated actuator response. */
 extern SDL_DECLSPEC bool SDLCALL SDL_RumbleGamepadFrequenciesEx(SDL_Gamepad *gamepad,
                                                                float left_low_amplitude, float left_low_frequency,
                                                                float left_high_amplitude, float left_high_frequency,

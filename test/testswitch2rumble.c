@@ -24,14 +24,10 @@ int main(void)
     assert(Switch2FrequencyCode(400.0f) == 512);
     assert(Switch2FrequencyCode(0) == 0);
     assert(Switch2FrequencyCode(100000) == 1023);
-    assert(Switch2AmplitudeCodeWithGain(0, 2) == 0);
-    assert(Switch2AmplitudeCodeWithGain(1, 1) == 1023);
-    assert(Switch2AmplitudeCodeWithGain(1, 3) == 1023);
-    assert(Switch2AmplitudeCodeWithGain(.5f, 1) == 512);
-    assert(Switch2AmplitudeCodeWithGain(.25f, 1) == 256);
-    assert(Switch2AmplitudeCodeWithGain(.25f, 2) == Switch2AmplitudeCodeWithGain(.5f, 1));
-    assert(Switch2AmplitudeCodeWithGain(.25f, 0) == Switch2AmplitudeCodeWithGain(.25f, 1));
-    assert(Switch2AmplitudeCodeWithGain(.25f, 4) == Switch2AmplitudeCodeWithGain(.25f, 1));
+    assert(Switch2AmplitudeCode(0) == 0);
+    assert(Switch2AmplitudeCode(1) == 1023);
+    assert(Switch2AmplitudeCode(.5f) == 512);
+    assert(Switch2AmplitudeCode(.25f) == 256);
     for (code = 0; code <= 1023; ++code) {
         Uint64 v;
         float hz = (float)(110.0 * SDL_pow(2.0, (code - 333.0) / 96.0));

@@ -24,14 +24,12 @@ static Uint16 Switch2FrequencyCode(float hz)
     return (Uint16)(hz - lower_hz <= upper_hz - hz ? lower : lower + 1);
 }
 
-/* Use the full 10-bit amplitude field for the experimental path. At unity
- * gain this is the patent's linear amplitude mapping, not a measured force. */
-static Uint16 Switch2AmplitudeCodeWithGain(float amplitude, float gain)
+/* Use the full 10-bit amplitude field without an additional gain. This is
+ * the patent's candidate linear mapping, not a measured force. */
+static Uint16 Switch2AmplitudeCode(float amplitude)
 {
-    if (!(gain >= 1.0f && gain <= 3.0f)) {
-        gain = 1.0f;
-    }
-    return (Uint16)SDL_floorf(SDL_clamp(amplitude * gain, 0.0f, 1.0f) * 1023.0f + 0.5f);
+    /* The application has already applied its source-specific strength. */
+    return (Uint16)SDL_floorf(SDL_clamp(amplitude, 0.0f, 1.0f) * 1023.0f + 0.5f);
 }
 
 /* Exactly the bit positions used by SDL's existing EncodeHDRumble:
