@@ -162,12 +162,14 @@ static SDL_vidpid_list SDL_allowed_gamepads = {
     SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, 0, 0, NULL,
     NULL, 0, 0, NULL,
     0, NULL,
+    true,
     false
 };
 static SDL_vidpid_list SDL_ignored_gamepads = {
     SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, 0, 0, NULL,
     NULL, 0, 0, NULL,
     0, NULL,
+    true,
     false
 };
 
@@ -1118,9 +1120,9 @@ static GamepadMapping_t *SDL_CreateMappingForHIDAPIGamepad(SDL_GUID guid)
 
     if ((vendor == USB_VENDOR_NINTENDO && product == USB_PRODUCT_NINTENDO_GAMECUBE_ADAPTER) ||
         (vendor == USB_VENDOR_DRAGONRISE &&
-         (product == USB_PRODUCT_EVORETRO_GAMECUBE_ADAPTER1 ||
-          product == USB_PRODUCT_EVORETRO_GAMECUBE_ADAPTER2 ||
-          product == USB_PRODUCT_EVORETRO_GAMECUBE_ADAPTER3))) {
+         (product == USB_PRODUCT_DRAGONRISE_GAMECUBE_ADAPTER1 ||
+          product == USB_PRODUCT_DRAGONRISE_GAMECUBE_ADAPTER2 ||
+          product == USB_PRODUCT_DRAGONRISE_GAMECUBE_ADAPTER3))) {
         // GameCube driver has 12 buttons and 6 axes
         SDL_strlcat(mapping_string, "a:b0,b:b2,dpdown:b6,dpleft:b4,dpright:b5,dpup:b7,lefttrigger:a4,leftx:a0,lefty:a1~,rightshoulder:b9,righttrigger:a5,rightx:a2,righty:a3~,start:b8,x:b1,y:b3,misc3:b11,misc4:b10,hint:!SDL_GAMECONTROLLER_USE_GAMECUBE_LABELS:=1,", sizeof(mapping_string));
     } else if (vendor == USB_VENDOR_NINTENDO &&
@@ -1300,7 +1302,7 @@ static GamepadMapping_t *SDL_CreateMappingForHIDAPIGamepad(SDL_GUID guid)
                 SDL_strlcat(mapping_string, "misc2:b15,misc3:b16,", sizeof(mapping_string));
             }
         } else if (SDL_IsJoystickGameSirController(vendor, product) &&
-                   guid.data[0] == SDL_HARDWARE_BUS_USB) {
+                   SDL_GetJoystickGUIDBus(guid) == SDL_HARDWARE_BUS_USB) {
             // The GameSir controllers have a set of paddles and shoulder macro buttons
             SDL_strlcat(mapping_string, "misc1:b11,paddle1:b13,paddle2:b12,paddle3:b15,paddle4:b14,", sizeof(mapping_string));
             if (product == USB_PRODUCT_GAMESIR_GAMEPAD_TARANTULA_8K) {

@@ -325,6 +325,7 @@ typedef struct
     bool m_bReportSensors;
     bool m_bHasSensorData;
     Uint64 m_ulLastInput;
+    bool m_bTimedOut;
     Uint64 m_ulLastIMUReset;
     Uint64 m_ulIMUSampleTimestampNS;
     Uint32 m_unIMUSamples;
@@ -2907,6 +2908,11 @@ static bool HIDAPI_DriverSwitch_UpdateDevice(SDL_HIDAPI_Device *device)
                 const int INPUT_WAIT_TIMEOUT_MS = 3000;
                 if (now >= (ctx->m_ulLastInput + INPUT_WAIT_TIMEOUT_MS)) {
                     // Bluetooth may have disconnected, try reopening the controller
+                    if (device->parent) {
+                        // Don't combine this device again until we get input from it
+                        device->broken = true;
+                        ctx->m_bTimedOut = true;
+                    }
                     size = -1;
                 }
             }
@@ -2927,6 +2933,10 @@ static bool HIDAPI_DriverSwitch_UpdateDevice(SDL_HIDAPI_Device *device)
     if (device->num_joysticks == 0 && device->is_bluetooth && packet_count > 0 &&
         !device->parent &&
         !HIDAPI_HasConnectedUSBDevice(device->serial)) {
+        if (ctx->m_bTimedOut) {
+            ctx->m_bTimedOut = false;
+            device->broken = false;
+        }
         HIDAPI_JoystickConnected(device, NULL);
     }
 

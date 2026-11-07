@@ -783,7 +783,9 @@ static const struct {
     Uint16 vendor;
     Uint16 product;
 } SDL_libusb_required[] = {
+#ifndef SDL_PLATFORM_MACOS
     { USB_VENDOR_NINTENDO, USB_PRODUCT_NINTENDO_GAMECUBE_ADAPTER },
+#endif
     { USB_VENDOR_NINTENDO, USB_PRODUCT_NINTENDO_SWITCH2_GAMECUBE_CONTROLLER },
     { USB_VENDOR_NINTENDO, USB_PRODUCT_NINTENDO_SWITCH2_JOYCON_LEFT },
     { USB_VENDOR_NINTENDO, USB_PRODUCT_NINTENDO_SWITCH2_JOYCON_RIGHT },
@@ -1099,20 +1101,20 @@ bool SDL_HIDAPI_ShouldIgnoreDevice(int bus, Uint16 vendor_id, Uint16 product_id,
                 return true;
             }
         } else if (vendor_id == USB_VENDOR_FLYDIGI_V1 && product_id == USB_PRODUCT_FLYDIGI_V1_GAMEPAD) {
-            if (usage_page == USB_USAGEPAGE_VENDOR_FLYDIGI) {
-                return false;
+            if (usage_page != USB_USAGEPAGE_VENDOR_FLYDIGI) {
+                return true;
             }
-            return true;
         } else if (vendor_id == USB_VENDOR_FLYDIGI_V2 &&
                     (product_id == USB_PRODUCT_FLYDIGI_V2_APEX || product_id == USB_PRODUCT_FLYDIGI_V2_VADER || product_id == USB_PRODUCT_FLYDIGI_V2_APEX6)) {
-            if (usage_page == USB_USAGEPAGE_VENDOR_FLYDIGI) {
-                return false;
+            if (usage_page != USB_USAGEPAGE_VENDOR_FLYDIGI) {
+                return true;
             }
-            return true;
         } else if (vendor_id == 0x20bc && (product_id == 0x5173 || product_id == 0x5174) &&
                    (usage_page == 0x00ff || usage_page == 0xff00 || usage_page == 0xff80) &&
                    (usage == 1 || usage == 3)) {
             // KP70C haptics companion, matched to its input device by container ID.
+        } else if (vendor_id == USB_VENDOR_NINTENDO && product_id == USB_PRODUCT_NINTENDO_GAMECUBE_ADAPTER) {
+            // This is a GameCube adapter
         } else if (usage_page == USB_USAGEPAGE_GENERIC_DESKTOP &&
                    (usage == USB_USAGE_GENERIC_JOYSTICK || usage == USB_USAGE_GENERIC_GAMEPAD || usage == USB_USAGE_GENERIC_MULTIAXISCONTROLLER)) {
             // This is a controller

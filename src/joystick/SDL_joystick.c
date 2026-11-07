@@ -57,7 +57,7 @@ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
 #ifdef SDL_JOYSTICK_PRIVATE
     &SDL_PRIVATE_JoystickDriver,
 #endif
-#ifdef SDL_JOYSTICK_GAMEINPUT // Higher priority than other Windows drivers
+#ifdef SDL_JOYSTICK_GAMEINPUT
     &SDL_GAMEINPUT_JoystickDriver,
 #endif
 #if defined(SDL_JOYSTICK_XINPUT)
@@ -69,11 +69,11 @@ static SDL_JoystickDriver *SDL_joystick_drivers[] = {
 #ifdef SDL_JOYSTICK_LINUX
     &SDL_LINUX_JoystickDriver,
 #endif
-#ifdef SDL_JOYSTICK_IOKIT
-    &SDL_DARWIN_JoystickDriver,
-#endif
 #if (defined(SDL_PLATFORM_MACOS) || defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)) && !defined(SDL_JOYSTICK_DISABLED)
     &SDL_IOS_JoystickDriver,
+#endif
+#ifdef SDL_JOYSTICK_IOKIT
+    &SDL_DARWIN_JoystickDriver,
 #endif
 #ifdef SDL_JOYSTICK_ANDROID
     &SDL_ANDROID_JoystickDriver,
@@ -296,6 +296,7 @@ static SDL_vidpid_list old_xboxone_controllers = {
     "SDL_JOYSTICK_OLD_XBOXONE_CONTROLLERS", 0, 0, NULL,
     "SDL_JOYSTICK_OLD_XBOXONE_CONTROLLERS_EXCLUDED", 0, 0, NULL,
     SDL_arraysize(initial_old_xboxone_controllers), initial_old_xboxone_controllers,
+    false,
     false
 };
 
@@ -337,6 +338,7 @@ static SDL_vidpid_list arcadestick_devices = {
     SDL_HINT_JOYSTICK_ARCADESTICK_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_ARCADESTICK_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_arcadestick_devices), initial_arcadestick_devices,
+    false,
     false
 };
 
@@ -448,10 +450,8 @@ static Uint32 initial_blacklist_devices[] = {
     MAKE_VIDPID(0x04d9, 0xa292), // OBINLB USB-HID Keyboard (Anne Pro II)
     MAKE_VIDPID(0x04d9, 0xa293), // OBINLB USB-HID Keyboard (Anne Pro II)
     MAKE_VIDPID(0x04f2, 0xa13c), // HP Deluxe Webcam KQ246AA
-    MAKE_VIDPID(0x0e6f, 0x018a), // PDP REALMz Wireless Controller for Switch, USB charging
     MAKE_VIDPID(0x1532, 0x0266), // Razer Huntsman V2 Analog, non-functional DInput device
     MAKE_VIDPID(0x1532, 0x0282), // Razer Huntsman Mini Analog, non-functional DInput device
-    MAKE_VIDPID(0x20d6, 0x0002), // PowerA Enhanced Wireless Controller for Nintendo Switch (charging port only)
     MAKE_VIDPID(0x256c, 0x006d), // Huion Tablet_GS1331, Huion Tablet_GS1331 Touch Strip
     MAKE_VIDPID(0x256c, 0x006e), // Huion Tablet Kamvas Pro 22, Huion Tablet Kamvas Pro 22 Touch Strip
     MAKE_VIDPID(0x26ce, 0x01a2), // ASRock LED Controller
@@ -467,6 +467,7 @@ static SDL_vidpid_list blacklist_devices = {
     SDL_HINT_JOYSTICK_BLACKLIST_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_BLACKLIST_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_blacklist_devices), initial_blacklist_devices,
+    true,
     false
 };
 
@@ -496,6 +497,7 @@ static SDL_vidpid_list flightstick_devices = {
     SDL_HINT_JOYSTICK_FLIGHTSTICK_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_FLIGHTSTICK_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_flightstick_devices), initial_flightstick_devices,
+    false,
     false
 };
 
@@ -515,6 +517,7 @@ static SDL_vidpid_list gamecube_devices = {
     SDL_HINT_JOYSTICK_GAMECUBE_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_GAMECUBE_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_gamecube_devices), initial_gamecube_devices,
+    false,
     false
 };
 
@@ -531,6 +534,7 @@ static SDL_vidpid_list rog_gamepad_mice = {
     SDL_HINT_ROG_GAMEPAD_MICE, 0, 0, NULL,
     SDL_HINT_ROG_GAMEPAD_MICE_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_rog_gamepad_mice), initial_rog_gamepad_mice,
+    true,
     false
 };
 
@@ -544,6 +548,7 @@ static SDL_vidpid_list throttle_devices = {
     SDL_HINT_JOYSTICK_THROTTLE_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_THROTTLE_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_throttle_devices), initial_throttle_devices,
+    false,
     false
 };
 
@@ -624,6 +629,7 @@ static SDL_vidpid_list wheel_devices = {
     SDL_HINT_JOYSTICK_WHEEL_DEVICES, 0, 0, NULL,
     SDL_HINT_JOYSTICK_WHEEL_DEVICES_EXCLUDED, 0, 0, NULL,
     SDL_arraysize(initial_wheel_devices), initial_wheel_devices,
+    false,
     false
 };
 
@@ -653,6 +659,7 @@ static SDL_vidpid_list guitar_devices = {
     SDL_HINT_JOYSTICK_GUITAR_DEVICES, 0, 0, NULL,
     NULL, 0, 0, NULL,
     SDL_arraysize(initial_guitar_devices), initial_guitar_devices,
+    false,
     false
 };
 
@@ -673,6 +680,7 @@ static SDL_vidpid_list drum_devices = {
     SDL_HINT_JOYSTICK_DRUM_DEVICES, 0, 0, NULL,
     NULL, 0, 0, NULL,
     SDL_arraysize(initial_drum_devices), initial_drum_devices,
+    false,
     false
 };
 
@@ -684,6 +692,7 @@ static SDL_vidpid_list zero_centered_devices = {
     SDL_HINT_JOYSTICK_ZERO_CENTERED_DEVICES, 0, 0, NULL,
     NULL, 0, 0, NULL,
     SDL_arraysize(initial_zero_centered_devices), initial_zero_centered_devices,
+    false,
     false
 };
 
@@ -850,6 +859,20 @@ static void SDL_FreeJoystickEvents(SDL_JoystickEventEntry *entries)
         SDL_free(entry);
         entry = next;
     }
+}
+
+static bool SDL_ShouldIgnoreDevice(SDL_JoystickDevice *device)
+{
+    Uint16 vendor, product, version;
+
+    SDL_GetJoystickGUIDInfo(device->guid, &vendor, &product, &version, NULL);
+
+    if (SDL_GetJoystickGUIDBus(device->guid) == SDL_HARDWARE_BUS_USB &&
+        SDL_IsJoystickUSBChargingOnly(vendor, product)) {
+        return true;
+    }
+
+    return SDL_ShouldIgnoreJoystick(vendor, product, version, device->name);
 }
 
 SDL_JoystickDevice *SDL_CreateJoystickDevice(SDL_JoystickDriver *driver, size_t extra_length)
@@ -1043,8 +1066,9 @@ static SDL_JoystickDevice *SDL_UpdatePendingJoystickDevices(void)
 {
     SDL_JoystickDevice *pending_devices = NULL;
 
-    SDL_JoystickDevice *tail = NULL;
-    for (int i = 0; i < SDL_arraysize(SDL_joystick_drivers); ++i) {
+    // Iterate the drivers in reverse order
+    // DirectInput takes a long time to enumerate and devices don't always show up in HIDAPI immediately
+    for (int i = SDL_arraysize(SDL_joystick_drivers); i--; ) {
         SDL_JoystickDriver *driver = SDL_GetJoystickDriver(i);
         if (!driver) {
             continue;
@@ -1057,14 +1081,13 @@ static SDL_JoystickDevice *SDL_UpdatePendingJoystickDevices(void)
         SDL_JoystickDevice *devices = driver->QueryDevices();
         if (devices) {
             if (pending_devices) {
-                tail->next = devices;
-            } else {
-                pending_devices = devices;
-                tail = devices;
+                SDL_JoystickDevice *tail = devices;
+                while (tail->next) {
+                    tail = tail->next;
+                }
+                tail->next = pending_devices;
             }
-            while (tail->next) {
-                tail = tail->next;
-            }
+            pending_devices = devices;
         }
     }
 
@@ -1106,8 +1129,10 @@ static void SDL_ProcessPendingJoystickDevices(SDL_JoystickDevice *pending_device
     SDL_JoystickDevice *old = SDL_joystick_devices;
     while (old) {
         SDL_JoystickDevice *next = old->next;
-        bool keep = false;
-        if (old->manually_added) {
+        bool keep;
+        if (old->ignored && old->published) {
+            keep = false;
+        } else if (old->manually_added) {
             keep = true;
         } else {
             // Pull the new device matching the old one out of the list
@@ -1117,6 +1142,8 @@ static void SDL_ProcessPendingJoystickDevices(SDL_JoystickDevice *pending_device
                 old->initializing = device->initializing;
                 SDL_DestroyJoystickDevice(device);
                 keep = true;
+            } else {
+                keep = false;
             }
         }
 
@@ -1144,23 +1171,42 @@ static void SDL_ProcessPendingJoystickDevices(SDL_JoystickDevice *pending_device
     SDL_joystick_devices = devices;
 
     // Send events for removed devices
-    while (removed) {
-        SDL_JoystickDevice *next = removed->next;
-        if (removed->published) {
-            SDL_PrivateJoystickRemoved(removed->instance_id);
+    for (SDL_JoystickDevice *device = removed; device; device = device->next) {
+        if (device->published) {
+            SDL_PrivateJoystickRemoved(device->instance_id);
         }
-        SDL_DestroyJoystickDevice(removed);
-        removed = next;
     }
 
     // Send events for devices that are ready to be published
     for (SDL_JoystickDevice *device = devices; device; device = device->next) {
-        if (!device->published && !device->initializing) {
-            bool prepared = true;
-            if (device->driver->PrepareDevice) {
-                prepared = device->driver->PrepareDevice(device);
+        if (!device->published && !device->initializing && !device->ignored) {
+            bool deferred = false;
+            for (SDL_JoystickDevice *entry = removed; entry; entry = entry->next) {
+                if (entry->published &&
+                    entry->driver != device->driver &&
+                    SDL_DevicesMatch(device, entry)) {
+                    // This matches a device that's being removed and will probably be
+                    // removed as well on the next update, check again in a bit.
+                    deferred = true;
+                    break;
+                }
             }
-            if (prepared) {
+            if (deferred) {
+                SDL_RequestJoystickDeviceUpdate(false);
+                continue;
+            }
+
+            if (!device->prepared) {
+                bool prepared = true;
+                if (device->driver->PrepareDevice) {
+                    prepared = device->driver->PrepareDevice(device);
+                }
+                device->prepared = prepared;
+            }
+
+            device->ignored = SDL_ShouldIgnoreDevice(device);
+
+            if (device->prepared && !device->ignored) {
                 if (!device->instance_id) {
                     device->instance_id = SDL_GetNextObjectID();
                 }
@@ -1168,6 +1214,12 @@ static void SDL_ProcessPendingJoystickDevices(SDL_JoystickDevice *pending_device
                 SDL_PrivateJoystickAdded(device->instance_id);
             }
         }
+    }
+
+    while (removed) {
+        SDL_JoystickDevice *next = removed->next;
+        SDL_DestroyJoystickDevice(removed);
+        removed = next;
     }
 }
 
@@ -3786,10 +3838,17 @@ bool SDL_JoystickEventsEnabled(void)
     return enabled;
 }
 
+Uint16 SDL_GetJoystickGUIDBus(SDL_GUID guid)
+{
+    Uint16 *guid16 = (Uint16 *)guid.data;
+
+    return SDL_Swap16LE(guid16[0]);
+}
+
 void SDL_GetJoystickGUIDInfo(SDL_GUID guid, Uint16 *vendor, Uint16 *product, Uint16 *version, Uint16 *crc16)
 {
     Uint16 *guid16 = (Uint16 *)guid.data;
-    Uint16 bus = SDL_Swap16LE(guid16[0]);
+    Uint16 bus = SDL_GetJoystickGUIDBus(guid);
 
     if ((bus < ' ' || bus == SDL_HARDWARE_BUS_VIRTUAL) && guid16[3] == 0x0000 && guid16[5] == 0x0000) {
         /* This GUID fits the standard form:
@@ -4071,6 +4130,25 @@ bool SDL_JoystickGUIDUsesVersion(SDL_GUID guid)
 
     SDL_GetJoystickGUIDInfo(guid, &vendor, &product, NULL, NULL);
     if (vendor && product) {
+        return true;
+    }
+    return false;
+}
+
+bool SDL_IsXInputDevice(Uint16 vendor_id, Uint16 product_id, const char *path)
+{
+    SDL_GamepadType type;
+
+    // If device path contains "IG_" then it's an XInput device
+    // See: https://docs.microsoft.com/windows/win32/xinput/xinput-and-directinput
+    if (path && SDL_strcasestr(path, "IG_") != NULL) {
+        return true;
+    }
+
+    type = SDL_GetGamepadTypeFromVIDPID(vendor_id, product_id, NULL, false);
+    if (type == SDL_GAMEPAD_TYPE_XBOX360 ||
+        type == SDL_GAMEPAD_TYPE_XBOXONE ||
+        (vendor_id == USB_VENDOR_VALVE && product_id == USB_PRODUCT_STEAM_VIRTUAL_GAMEPAD)) {
         return true;
     }
     return false;
@@ -4427,6 +4505,27 @@ static SDL_JoystickType SDL_GetJoystickGUIDType(SDL_GUID guid)
     }
 
     return SDL_JOYSTICK_TYPE_UNKNOWN;
+}
+
+bool SDL_IsJoystickUSBChargingOnly(Uint16 vendor_id, Uint16 product_id)
+{
+    // Wireless controllers that only charge over USB, and may use the same VID/PID over Bluetooth
+    static const Uint32 usb_charging_only_devices[] = {
+        MAKE_VIDPID(0x0e6f, 0x0186), // PDP Afterglow Wireless Switch Controller
+        MAKE_VIDPID(0x0e6f, 0x018a), // PDP REALMz Wireless Controller for Switch
+        MAKE_VIDPID(0x0e6f, 0x0193), // Turtle Beach Rematch Wireless Controller for Nintendo Switch 2
+        MAKE_VIDPID(0x0e6f, 0x0195), // Turtle Beach Afterglow Wireless Controller for Switch 2
+        MAKE_VIDPID(0x20d6, 0x0002), // PowerA Enhanced Wireless Controller for Nintendo Switch
+    };
+
+    Uint32 id = MAKE_VIDPID(vendor_id, product_id);
+
+    for (int i = 0; i < SDL_arraysize(usb_charging_only_devices); ++i) {
+        if (id == usb_charging_only_devices[i]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool SDL_ShouldIgnoreJoystick(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name)
@@ -4879,6 +4978,24 @@ void SDL_SendJoystickCapSense(Uint64 timestamp, SDL_Joystick *joystick, SDL_Game
     }
 }
 
+static void SDL_IgnoreJoystickHintUpdated(void)
+{
+    SDL_LockJoysticks();
+    for (SDL_JoystickDevice *device = SDL_joystick_devices; device; device = device->next) {
+        if (device->prepared) {
+            device->ignored = SDL_ShouldIgnoreDevice(device);
+        }
+    }
+#ifdef SDL_JOYSTICK_HIDAPI
+    // HIDAPI doesn't open ignored devices, so it needs to re-check them
+    HIDAPI_IgnoredDevicesChanged();
+#endif
+    SDL_UnlockJoysticks();
+
+    // Make sure we re-enumerate devices as how they show up may have changed
+    SDL_RequestJoystickDeviceUpdate(true);
+}
+
 static void SDL_LoadVIDPIDListFromHint(const char *hint, int *num_entries, int *max_entries, Uint32 **entries)
 {
     Uint32 entry;
@@ -4976,6 +5093,10 @@ static void SDLCALL SDL_VIDPIDIncludedHintChanged(void *userdata, const char *na
         excluded_list = SDL_GetHint(list->excluded_hint_name);
     }
     SDL_LoadVIDPIDListFromHints(list, included_list, excluded_list);
+
+    if (list->affects_ignored_joysticks) {
+        SDL_IgnoreJoystickHintUpdated();
+    }
 }
 
 static void SDLCALL SDL_VIDPIDExcludedHintChanged(void *userdata, const char *name, const char *oldValue, const char *hint)
@@ -4992,6 +5113,10 @@ static void SDLCALL SDL_VIDPIDExcludedHintChanged(void *userdata, const char *na
         included_list = SDL_GetHint(list->included_hint_name);
     }
     SDL_LoadVIDPIDListFromHints(list, included_list, excluded_list);
+
+    if (list->affects_ignored_joysticks) {
+        SDL_IgnoreJoystickHintUpdated();
+    }
 }
 
 void SDL_LoadVIDPIDList(SDL_vidpid_list *list)

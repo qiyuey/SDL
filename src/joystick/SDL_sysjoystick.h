@@ -56,7 +56,7 @@ typedef struct SDL_JoystickDeviceMatch
 } SDL_JoystickDeviceMatch;
 
 // Everything that an application can see about a joystick before it's opened
-typedef struct SDL_JoystickDevice
+struct SDL_JoystickDevice
 {
     // Data generated at enumeration time
     SDL_JoystickDriver *driver;
@@ -70,7 +70,9 @@ typedef struct SDL_JoystickDevice
 
     // State tracking
     bool manually_added;
+    bool prepared;
     bool published;
+    bool ignored;
 
     // Data that's available once it's published
     SDL_JoystickID instance_id;
@@ -82,7 +84,7 @@ typedef struct SDL_JoystickDevice
 
     struct SDL_JoystickDevice *next;
 
-} SDL_JoystickDevice;
+};
 
 typedef struct SDL_JoystickAxisInfo
 {
@@ -221,7 +223,7 @@ struct SDL_Joystick
 // Macro to combine a USB vendor ID and product ID into a single Uint32 value
 #define MAKE_VIDPID(VID, PID) (((Uint32)(VID)) << 16 | (PID))
 
-typedef struct SDL_JoystickDriver
+struct SDL_JoystickDriver
 {
     // Optional function to initialize the driver
     bool (*Init)(void);
@@ -282,7 +284,7 @@ typedef struct SDL_JoystickDriver
                                 float right_low_amplitude, float right_low_frequency,
                                 float right_high_amplitude, float right_high_frequency);
 
-} SDL_JoystickDriver;
+};
 
 extern bool SDL_PrivateRumbleJoystickFrequenciesEx(SDL_Joystick *joystick,
                                                     float left_low_amplitude, float left_low_frequency,

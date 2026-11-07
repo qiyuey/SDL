@@ -116,12 +116,18 @@ extern void SDL_SetJoystickGUIDVersion(SDL_GUID *guid, Uint16 version);
 // Function to set the CRC field of a joystick GUID
 extern void SDL_SetJoystickGUIDCRC(SDL_GUID *guid, Uint16 crc);
 
+// Function to get the bus field of a joystick GUID
+extern Uint16 SDL_GetJoystickGUIDBus(SDL_GUID guid);
+
 // Function to return the type of a controller
 extern SDL_GamepadType SDL_GetGamepadTypeFromVIDPID(Uint16 vendor, Uint16 product, const char *name, bool forUI);
 extern SDL_GamepadType SDL_GetGamepadTypeFromGUID(SDL_GUID guid, const char *name);
 
 // Function to return whether a joystick GUID uses the version field
 extern bool SDL_JoystickGUIDUsesVersion(SDL_GUID guid);
+
+// Function to return whether a Windows device is handled by XInput
+extern bool SDL_IsXInputDevice(Uint16 vendor_id, Uint16 product_id, const char *path);
 
 // Function to return whether a joystick is an Xbox One controller
 extern bool SDL_IsJoystickXboxOne(Uint16 vendor_id, Uint16 product_id);
@@ -206,6 +212,9 @@ extern bool SDL_IsJoystickVIRTUAL(SDL_GUID guid);
 
 // Function to return whether a joystick is a wheel
 extern bool SDL_IsJoystickWheel(Uint16 vendor_id, Uint16 product_id, Uint16 crc);
+
+// Function to return whether a joystick only charges over USB and doesn't provide input
+extern bool SDL_IsJoystickUSBChargingOnly(Uint16 vendor_id, Uint16 product_id);
 
 // Function to return whether a joystick should be ignored
 extern bool SDL_ShouldIgnoreJoystick(Uint16 vendor_id, Uint16 product_id, Uint16 version, const char *name);
@@ -306,6 +315,8 @@ typedef struct
 
     int num_initial_entries;
     Uint32 *initial_entries;
+
+    bool affects_ignored_joysticks;
 
     bool initialized;
 } SDL_vidpid_list;

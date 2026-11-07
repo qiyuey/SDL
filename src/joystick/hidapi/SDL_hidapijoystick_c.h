@@ -115,6 +115,9 @@ typedef struct SDL_HIDAPI_Device
     // This can happen on Windows with Bluetooth devices that have turned off
     bool broken;
 
+    // Used to flag children whose parent has been removed
+    bool orphaned;
+
     struct SDL_HIDAPI_Device *parent;
     int num_children;
     struct SDL_HIDAPI_Device **children;
@@ -200,6 +203,7 @@ extern SDL_JoystickType HIDAPI_GetJoystickTypeFromGUID(SDL_GUID guid);
 extern SDL_GamepadType HIDAPI_GetGamepadTypeFromGUID(SDL_GUID guid);
 
 extern void HIDAPI_UpdateDevices(void);
+extern void HIDAPI_IgnoredDevicesChanged(void);
 extern void HIDAPI_SetDeviceName(SDL_HIDAPI_Device *device, const char *name);
 extern void HIDAPI_SetDeviceProduct(SDL_HIDAPI_Device *device, Uint16 vendor_id, Uint16 product_id);
 extern void HIDAPI_SetDeviceSerial(SDL_HIDAPI_Device *device, const char *serial);
