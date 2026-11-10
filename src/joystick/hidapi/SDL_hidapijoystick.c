@@ -1645,6 +1645,32 @@ static bool HIDAPI_JoystickSendEffect(SDL_Joystick *joystick, const void *data, 
     return result;
 }
 
+static bool HIDAPI_JoystickRumbleFrequenciesEx(SDL_Joystick *joystick,
+                                               float left_low_amplitude, float left_low_frequency,
+                                               float left_high_amplitude, float left_high_frequency,
+                                               float right_low_amplitude, float right_low_frequency,
+                                               float right_high_amplitude, float right_high_frequency)
+{
+    SDL_HIDAPI_Device *device = NULL;
+    if (HIDAPI_GetJoystickDevice(joystick, &device)) {
+        if (device->driver->RumbleJoystickFrequenciesEx) {
+            return device->driver->RumbleJoystickFrequenciesEx(device, joystick,
+                                                            left_low_amplitude, left_low_frequency,
+                                                            left_high_amplitude, left_high_frequency,
+                                                            right_low_amplitude, right_low_frequency,
+                                                            right_high_amplitude, right_high_frequency);
+        }
+        // HIDAPI itself has the extension, but many of its device drivers do not.
+        if (!device->driver->RumbleJoystick) {
+            return SDL_Unsupported();
+        }
+        return device->driver->RumbleJoystick(device, joystick,
+            (Uint16)(SDL_clamp(SDL_max(left_low_amplitude, right_low_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16),
+            (Uint16)(SDL_clamp(SDL_max(left_high_amplitude, right_high_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16));
+    }
+    return SDL_Unsupported();
+}
+
 static bool HIDAPI_JoystickSetSensorsEnabled(SDL_Joystick *joystick, bool enabled)
 {
     bool result;
@@ -1752,7 +1778,8 @@ SDL_JoystickDriver SDL_HIDAPI_JoystickDriver = {
     .SetPlayerIndex = HIDAPI_JoystickSetPlayerIndex,
     .Update = HIDAPI_JoystickUpdate,
     .Close = HIDAPI_JoystickClose,
-    .Quit = HIDAPI_JoystickQuit
+    .Quit = HIDAPI_JoystickQuit,
+    .RumbleFrequenciesEx = HIDAPI_JoystickRumbleFrequenciesEx
 };
 
 #endif // SDL_JOYSTICK_HIDAPI

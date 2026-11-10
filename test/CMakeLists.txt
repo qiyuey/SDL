@@ -414,6 +414,8 @@ add_sdl_test_executable(testaudio MAIN_CALLBACKS NEEDS_RESOURCES TESTUTILS SOURC
 add_sdl_test_executable(testcolorspace SOURCES testcolorspace.c NAME83 colorspc)
 add_sdl_test_executable(testfile NONINTERACTIVE SOURCES testfile.c)
 add_sdl_test_executable(testcontroller TESTUTILS SOURCES testcontroller.c gamepadutils.c ${gamepad_image_headers} DEPENDS generate-gamepad_image_headers NAME83 control)
+add_sdl_test_executable(testlinearhaptics SOURCES testlinearhaptics.c NAME83 lnhap)
+add_sdl_test_executable(testswitch2rumble NONINTERACTIVE SOURCES testswitch2rumble.c NAME83 sw2rumbl)
 add_sdl_test_executable(testdlopennote TESTUTILS SOURCES testdlopennote.c NAME83 dlnote)
 add_sdl_test_executable(testgeometry TESTUTILS SOURCES testgeometry.c NAME83 geometry)
 add_sdl_test_executable(testgl SOURCES testgl.c NAME83 gl)
@@ -938,4 +940,14 @@ if(ANDROID AND TARGET SDL3::Jar)
             )
         endif()
     endif()
+endif()
+
+# Ordered Switch 2 transport regression: fake libusb, no physical output.
+if(WIN32 AND LibUSB_INCLUDE_PATH AND TARGET SDL3-shared)
+    add_executable(testswitch2async testswitch2async.c)
+    target_include_directories(testswitch2async PRIVATE "${SDL3_SOURCE_DIR}/src" "${LibUSB_INCLUDE_PATH}")
+    target_link_libraries(testswitch2async PRIVATE SDL3-shared)
+    add_test(NAME testswitch2async COMMAND testswitch2async)
+    set_tests_properties(testswitch2async PROPERTIES TIMEOUT 20
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:SDL3-shared>")
 endif()

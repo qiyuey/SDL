@@ -4130,6 +4130,25 @@ bool SDL_RumbleGamepad(SDL_Gamepad *gamepad, Uint16 low_frequency_rumble, Uint16
     return SDL_RumbleJoystick(joystick, low_frequency_rumble, high_frequency_rumble, duration_ms);
 }
 
+bool SDL_RumbleGamepadFrequenciesEx(SDL_Gamepad *gamepad,
+                                    float left_low_amplitude, float left_low_frequency,
+                                    float left_high_amplitude, float left_high_frequency,
+                                    float right_low_amplitude, float right_low_frequency,
+                                    float right_high_amplitude, float right_high_frequency,
+                                    Uint32 duration_ms)
+{
+    SDL_Joystick *joystick = SDL_GetGamepadJoystick(gamepad);
+    if (!joystick) {
+        return false;
+    }
+    return SDL_PrivateRumbleJoystickFrequenciesEx(joystick,
+                                           left_low_amplitude, left_low_frequency,
+                                           left_high_amplitude, left_high_frequency,
+                                           right_low_amplitude, right_low_frequency,
+                                           right_high_amplitude, right_high_frequency,
+                                           duration_ms);
+}
+
 bool SDL_RumbleGamepadTriggers(SDL_Gamepad *gamepad, Uint16 left_rumble, Uint16 right_rumble, Uint32 duration_ms)
 {
     SDL_Joystick *joystick = SDL_GetGamepadJoystick(gamepad);

@@ -762,6 +762,7 @@ SDL3_0.0.0 {
     SDL_ResumeAudioStreamDevice;
     SDL_ResumeHaptic;
     SDL_RumbleGamepad;
+    SDL_RumbleGamepadFrequenciesEx;
     SDL_RumbleGamepadTriggers;
     SDL_RumbleJoystick;
     SDL_RumbleJoystickTriggers;

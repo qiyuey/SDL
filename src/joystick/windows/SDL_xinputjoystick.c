@@ -26,7 +26,6 @@
 #ifdef SDL_JOYSTICK_XINPUT
 
 #include "../../core/windows/SDL_xinput.h"
-#include "../../core/windows/SDL_gameinput.h"
 #include "../hidapi/SDL_hidapijoystick_c.h"
 
 // The XInput slot and subtype, also used as the unique ID for a device
@@ -262,8 +261,9 @@ static bool XINPUT_JoystickInit(void)
 {
     bool enabled = true;
 
-    if (!SDL_GetHintBoolean(SDL_HINT_XINPUT_ENABLED, true) ||
-        SDL_UsingGameInputForXInputControllers()) {
+    // Keep XInput available for controllers GameInput does not enumerate.
+    // The joystick layer hides devices already handled by a higher priority driver.
+    if (!SDL_GetHintBoolean(SDL_HINT_XINPUT_ENABLED, true)) {
         enabled = false;
     }
 

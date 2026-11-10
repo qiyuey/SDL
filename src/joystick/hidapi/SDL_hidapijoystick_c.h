@@ -146,6 +146,11 @@ typedef struct SDL_HIDAPI_DeviceDriver
     bool (*SetJoystickSensorsEnabled)(SDL_HIDAPI_Device *device, SDL_Joystick *joystick, bool enabled);
     void (*CloseJoystick)(SDL_HIDAPI_Device *device, SDL_Joystick *joystick);
     void (*FreeDevice)(SDL_HIDAPI_Device *device);
+    bool (*RumbleJoystickFrequenciesEx)(SDL_HIDAPI_Device *device, SDL_Joystick *joystick,
+                                        float left_low_amplitude, float left_low_frequency,
+                                        float left_high_amplitude, float left_high_frequency,
+                                        float right_low_amplitude, float right_low_frequency,
+                                        float right_high_amplitude, float right_high_frequency);
 
 } SDL_HIDAPI_DeviceDriver;
 

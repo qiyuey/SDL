@@ -3142,7 +3142,7 @@ bool SDL_RumbleJoystick(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uin
         CHECK_JOYSTICK_MAGIC(joystick, false);
 
         if (low_frequency_rumble == joystick->low_frequency_rumble &&
-            high_frequency_rumble == joystick->high_frequency_rumble) {
+            high_frequency_rumble == joystick->high_frequency_rumble && !joystick->rumble_using_frequencies) {
             // Just update the expiration
             result = true;
         } else if (joystick->driver->Rumble) {
@@ -3160,6 +3160,7 @@ bool SDL_RumbleJoystick(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uin
         }
 
         if (result) {
+            joystick->rumble_using_frequencies = false;
             joystick->low_frequency_rumble = low_frequency_rumble;
             joystick->high_frequency_rumble = high_frequency_rumble;
 
@@ -3176,6 +3177,61 @@ bool SDL_RumbleJoystick(SDL_Joystick *joystick, Uint16 low_frequency_rumble, Uin
     }
     SDL_UnlockJoysticks();
 
+    return result;
+}
+
+bool SDL_PrivateRumbleJoystickFrequenciesEx(SDL_Joystick *joystick,
+                                            float left_low_amplitude, float left_low_frequency,
+                                            float left_high_amplitude, float left_high_frequency,
+                                            float right_low_amplitude, float right_low_frequency,
+                                            float right_high_amplitude, float right_high_frequency,
+                                            Uint32 duration_ms)
+{
+    bool result = false;
+    if (!(left_low_amplitude >= 0 && left_low_amplitude <= 1) ||
+        !(left_high_amplitude >= 0 && left_high_amplitude <= 1) ||
+        !(right_low_amplitude >= 0 && right_low_amplitude <= 1) ||
+        !(right_high_amplitude >= 0 && right_high_amplitude <= 1) ||
+        !(left_low_frequency >= 0 && left_low_frequency <= SDL_MAX_SINT32) ||
+        !(left_high_frequency >= 0 && left_high_frequency <= SDL_MAX_SINT32) ||
+        !(right_low_frequency >= 0 && right_low_frequency <= SDL_MAX_SINT32) ||
+        !(right_high_frequency >= 0 && right_high_frequency <= SDL_MAX_SINT32)) {
+        return SDL_SetError("Rumble amplitudes must be finite in [0,1] and frequencies finite and nonnegative");
+    }
+    SDL_LockJoysticks();
+    {
+        CHECK_JOYSTICK_MAGIC(joystick, false);
+        if (!joystick->attached) {
+            SDL_UnlockJoysticks();
+            return SDL_SetError("Gamepad is disconnected");
+        }
+        if (joystick->driver->RumbleFrequenciesEx) {
+            result = joystick->driver->RumbleFrequenciesEx(joystick,
+                                                            left_low_amplitude, left_low_frequency,
+                                                            left_high_amplitude, left_high_frequency,
+                                                            right_low_amplitude, right_low_frequency,
+                                                            right_high_amplitude, right_high_frequency);
+        } else if (joystick->driver->Rumble) {
+            const bool left_low = left_low_amplitude >= right_low_amplitude;
+            const bool left_high = left_high_amplitude >= right_high_amplitude;
+            const float low_amplitude = left_low ? left_low_amplitude : right_low_amplitude;
+            const float high_amplitude = left_high ? left_high_amplitude : right_high_amplitude;
+            const Uint16 low = (Uint16)(SDL_clamp(low_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+            const Uint16 high = (Uint16)(SDL_clamp(high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
+            result = joystick->driver->Rumble(joystick, low, high);
+        } else {
+            result = SDL_Unsupported();
+        }
+        if (result) {
+            // Keep the ordinary stop path aware that the frequency API started motors.
+            joystick->rumble_using_frequencies = true;
+            joystick->low_frequency_rumble = (Uint16)(SDL_clamp(SDL_max(left_low_amplitude, right_low_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16);
+            joystick->high_frequency_rumble = (Uint16)(SDL_clamp(SDL_max(left_high_amplitude, right_high_amplitude), 0.0f, 1.0f) * SDL_MAX_UINT16);
+            joystick->rumble_expiration = duration_ms ? SDL_GetTicks() + SDL_min(duration_ms, SDL_MAX_RUMBLE_DURATION_MS) : 0;
+            joystick->rumble_resend = 0;
+        }
+    }
+    SDL_UnlockJoysticks();
     return result;
 }
 

@@ -33,6 +33,11 @@
 
 #ifdef SDL_JOYSTICK_HIDAPI_SWITCH2
 
+#include "SDL_switch2_rumble.h"
+#ifdef SDL_PLATFORM_WINDOWS
+#include "SDL_switch2_rumble_async.h"
+#endif
+
 #define RUMBLE_INTERVAL 12
 #define RUMBLE_MAX 29000
 
@@ -99,6 +104,9 @@ typedef struct
     Uint8 out_endpoint;
     Uint8 in_endpoint;
 
+#ifdef SDL_PLATFORM_WINDOWS
+    SDL_Switch2Rumble *rumble_transport;
+#endif
     Uint64 rumble_timestamp;
     Uint32 rumble_seq;
     Uint16 rumble_hi_amp;
@@ -107,6 +115,8 @@ typedef struct
     Uint16 rumble_lo_freq;
     Uint32 rumble_error;
     bool rumble_updated;
+    bool rumble_independent;
+    Uint8 rumble_sides[2][5];
 
     Switch2_StickCalibration left_stick;
     Switch2_StickCalibration right_stick;
@@ -132,6 +142,8 @@ typedef struct
     bool vertical_mode;
     Uint8 last_state[USB_PACKET_LENGTH];
 } SDL_DriverSwitch2_Context;
+
+static bool UpdateRumble(SDL_DriverSwitch2_Context *ctx);
 
 static void ParseStickCalibration(Switch2_StickCalibration *stick_data, const Uint8 *data)
 {
@@ -368,7 +380,6 @@ static bool FindBulkEndpoints(SDL_LibUSBContext *libusb, libusb_device_handle *h
 static bool HIDAPI_DriverSwitch2_InitUSB(SDL_HIDAPI_Device *device)
 {
     SDL_DriverSwitch2_Context *ctx = (SDL_DriverSwitch2_Context *)device->context;
-
     if (!SDL_InitLibUSB(&ctx->libusb)) {
         return false;
     }
@@ -561,6 +572,39 @@ static bool HIDAPI_DriverSwitch2_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joy
 {
     SDL_DriverSwitch2_Context *ctx = (SDL_DriverSwitch2_Context *)device->context;
 
+#ifdef SDL_PLATFORM_WINDOWS
+    if (device->product_id == USB_PRODUCT_NINTENDO_SWITCH2_PRO) {
+        if (!ctx->rumble_transport) {
+            struct libusb_config_descriptor *config = NULL;
+            Uint8 endpoint = 0;
+            if (ctx->libusb->get_config_descriptor(ctx->libusb->get_device(ctx->device_handle), 0, &config) == 0) {
+                for (unsigned i = 0; i < config->bNumInterfaces; ++i) {
+                    const struct libusb_interface *iface = &config->interface[i];
+                    for (int j = 0; j < iface->num_altsetting; ++j) {
+                        const struct libusb_interface_descriptor *alt = &iface->altsetting[j];
+                        if (alt->bInterfaceClass != LIBUSB_CLASS_HID ||
+                            alt->bInterfaceNumber != device->interface_number) continue;
+                        for (unsigned k = 0; k < alt->bNumEndpoints; ++k) {
+                            const struct libusb_endpoint_descriptor *ep = &alt->endpoint[k];
+                            if ((ep->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK) == LIBUSB_TRANSFER_TYPE_INTERRUPT &&
+                                !(ep->bEndpointAddress & LIBUSB_ENDPOINT_IN) && ep->wMaxPacketSize == 64)
+                                endpoint = ep->bEndpointAddress;
+                        }
+                    }
+                }
+                ctx->libusb->free_config_descriptor(config);
+            }
+            if (!endpoint) return SDL_SetError("Switch2 HID interrupt OUT endpoint not found");
+            ctx->rumble_transport = SDL_Switch2RumbleCreate(ctx->libusb, ctx->device_handle, endpoint);
+            if (!ctx->rumble_transport) return false;
+        }
+        if (!SDL_Switch2RumbleResume(ctx->rumble_transport))
+            return SDL_SetError("Switch2 rumble transport disconnected");
+    }
+#endif
+    ctx->rumble_lo_amp = ctx->rumble_hi_amp = 0;
+    ctx->rumble_updated = false;
+    ctx->rumble_timestamp = 0;
     ctx->joystick = joystick;
 
     // Initialize player index (needed for setting LEDs)
@@ -619,12 +663,52 @@ static bool HIDAPI_DriverSwitch2_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_J
 {
     SDL_DriverSwitch2_Context *ctx = (SDL_DriverSwitch2_Context *)device->context;
 
-    if (low_frequency_rumble != ctx->rumble_lo_amp || high_frequency_rumble != ctx->rumble_hi_amp) {
+    if (ctx->rumble_independent || low_frequency_rumble != ctx->rumble_lo_amp || high_frequency_rumble != ctx->rumble_hi_amp) {
+        ctx->rumble_independent = false;
         ctx->rumble_lo_amp = low_frequency_rumble;
         ctx->rumble_hi_amp = high_frequency_rumble;
         ctx->rumble_updated = true;
     }
 
+    if (!low_frequency_rumble && !high_frequency_rumble && ctx->rumble_updated) {
+        /* A stop must not wait for the next input report (or survive close). */
+        ctx->rumble_timestamp = 0;
+        return UpdateRumble(ctx);
+    }
+#ifdef SDL_PLATFORM_WINDOWS
+    if (ctx->rumble_transport) return UpdateRumble(ctx);
+#endif
+    return true;
+}
+
+static bool HIDAPI_DriverSwitch2_RumbleJoystickFrequenciesEx(SDL_HIDAPI_Device *device, SDL_Joystick *joystick,
+    float left_low_amplitude, float left_low_frequency, float left_high_amplitude, float left_high_frequency,
+    float right_low_amplitude, float right_low_frequency, float right_high_amplitude, float right_high_frequency)
+{
+    SDL_DriverSwitch2_Context *ctx = (SDL_DriverSwitch2_Context *)device->context;
+    if (device->product_id != USB_PRODUCT_NINTENDO_SWITCH2_PRO ||
+        !SDL_GetHintBoolean("SDL_JOYSTICK_HIDAPI_SWITCH2_EXPERIMENTAL_HD", false)) {
+        return HIDAPI_DriverSwitch2_RumbleJoystick(device, joystick,
+            (Uint16)(SDL_max(left_low_amplitude, right_low_amplitude) * SDL_MAX_UINT16),
+            (Uint16)(SDL_max(left_high_amplitude, right_high_amplitude) * SDL_MAX_UINT16));
+    }
+    /* Keep the upstream first=high, second=low convention until physical
+     * measurement establishes whether these labels match the two components. */
+    Switch2PackRumble(Switch2FrequencyCode(left_high_frequency), Switch2AmplitudeCode(left_high_amplitude),
+                     Switch2FrequencyCode(left_low_frequency), Switch2AmplitudeCode(left_low_amplitude), ctx->rumble_sides[0]);
+    Switch2PackRumble(Switch2FrequencyCode(right_high_frequency), Switch2AmplitudeCode(right_high_amplitude),
+                     Switch2FrequencyCode(right_low_frequency), Switch2AmplitudeCode(right_low_amplitude), ctx->rumble_sides[1]);
+    ctx->rumble_lo_amp = (Uint16)(SDL_max(left_low_amplitude, right_low_amplitude) * SDL_MAX_UINT16);
+    ctx->rumble_hi_amp = (Uint16)(SDL_max(left_high_amplitude, right_high_amplitude) * SDL_MAX_UINT16);
+    ctx->rumble_independent = true;
+    ctx->rumble_updated = true;
+    if (!ctx->rumble_lo_amp && !ctx->rumble_hi_amp) {
+        ctx->rumble_timestamp = 0;
+        return UpdateRumble(ctx);
+    }
+#ifdef SDL_PLATFORM_WINDOWS
+    if (ctx->rumble_transport) return UpdateRumble(ctx);
+#endif
     return true;
 }
 
@@ -1024,15 +1108,17 @@ static bool UpdateRumble(SDL_DriverSwitch2_Context *ctx)
     }
 
     Uint64 timestamp = SDL_GetTicks();
-    Uint64 interval = RUMBLE_INTERVAL;
+    const bool fast_output = ctx->device->product_id == USB_PRODUCT_NINTENDO_SWITCH2_PRO;
+    Uint64 interval = fast_output ? SDL_HIDAPI_RUMBLE_FAST_INTERVAL_MS : RUMBLE_INTERVAL;
 
-    if (timestamp < ctx->rumble_timestamp) {
-        return true;
-    }
-
-    if (!SDL_HIDAPI_LockRumble()) {
-        return false;
-    }
+    bool async_output = false;
+#ifdef SDL_PLATFORM_WINDOWS
+    async_output = ctx->rumble_transport != NULL;
+#endif
+    // The async owner gates the actual USB submission in nanoseconds. A second
+    // millisecond gate here can skip whole updates when the frontend jitters.
+    if (!async_output && timestamp < ctx->rumble_timestamp) return true;
+    if (!async_output && !SDL_HIDAPI_LockRumble()) return false;
 
     unsigned char rumble_data[64] = {0};
     if (ctx->device->product_id == USB_PRODUCT_NINTENDO_SWITCH2_GAMECUBE_CONTROLLER) {
@@ -1070,8 +1156,29 @@ static bool UpdateRumble(SDL_DriverSwitch2_Context *ctx)
         case USB_PRODUCT_NINTENDO_SWITCH2_PRO:
             rumble_data[0] = 0x2;
             SDL_memcpy(&rumble_data[0x11], &rumble_data[0x01], 6);
+            if (ctx->rumble_independent) {
+                SDL_memcpy(&rumble_data[0x02], ctx->rumble_sides[0], 5);
+                SDL_memcpy(&rumble_data[0x12], ctx->rumble_sides[1], 5);
+            }
             break;
         }
+    }
+    /* Retain pending state if submission fails, including an unsent stop. */
+    const bool stopped = !ctx->rumble_lo_amp && !ctx->rumble_hi_amp;
+    int submitted;
+#ifdef SDL_PLATFORM_WINDOWS
+    if (async_output) {
+        submitted = SDL_Switch2RumbleQueue(ctx->rumble_transport, rumble_data, stopped) ? (int)sizeof(rumble_data) : -1;
+    } else
+#endif
+    {
+        submitted = fast_output
+            ? SDL_HIDAPI_SendRumbleLatestAndUnlock(ctx->device, rumble_data, sizeof(rumble_data),
+                                                 SDL_HIDAPI_RUMBLE_FAST_INTERVAL_MS, stopped)
+            : SDL_HIDAPI_SendRumbleAndUnlock(ctx->device, rumble_data, sizeof(rumble_data));
+    }
+    if (submitted != sizeof(rumble_data)) {
+        return SDL_SetError("Couldn't queue rumble packet");
     }
     ctx->rumble_seq++;
     ctx->rumble_updated = false;
@@ -1081,12 +1188,9 @@ static bool UpdateRumble(SDL_DriverSwitch2_Context *ctx)
         if (!ctx->rumble_timestamp) {
             ctx->rumble_timestamp = timestamp;
         }
-        ctx->rumble_timestamp += interval;
+        ctx->rumble_timestamp = timestamp + interval;
     }
 
-    if (SDL_HIDAPI_SendRumbleAndUnlock(ctx->device, rumble_data, sizeof(rumble_data)) != sizeof(rumble_data)) {
-        return SDL_SetError("Couldn't send rumble packet");
-    }
     return true;
 }
 
@@ -1255,7 +1359,14 @@ static bool HIDAPI_DriverSwitch2_UpdateDevice(SDL_HIDAPI_Device *device)
         UpdateRumble(ctx);
     }
 
+    if (joystick && size >= 0) {
+        /* Service pending output even when this update received no input. */
+        UpdateRumble(ctx);
+    }
     if (size < 0) {
+#ifdef SDL_PLATFORM_WINDOWS
+        if (ctx->rumble_transport) SDL_Switch2RumbleDisconnect(ctx->rumble_transport);
+#endif
         // Read error, device is disconnected
         HIDAPI_JoystickDisconnected(device, device->joysticks[0]);
     }
@@ -1269,6 +1380,12 @@ static void HIDAPI_DriverSwitch2_CloseJoystick(SDL_HIDAPI_Device *device, SDL_Jo
     SDL_RemoveHintCallback(SDL_HINT_JOYSTICK_HIDAPI_SWITCH_PLAYER_LED,
                            SDL_PlayerLEDHintChanged, ctx);
 
+#ifdef SDL_PLATFORM_WINDOWS
+    if (ctx->rumble_transport) SDL_Switch2RumblePause(ctx->rumble_transport);
+#endif
+    ctx->rumble_lo_amp = ctx->rumble_hi_amp = 0;
+    ctx->rumble_updated = false;
+    ctx->rumble_timestamp = 0;
     ctx->joystick = NULL;
 }
 
@@ -1277,6 +1394,10 @@ static void HIDAPI_DriverSwitch2_FreeDevice(SDL_HIDAPI_Device *device)
     SDL_DriverSwitch2_Context *ctx = (SDL_DriverSwitch2_Context *)device->context;
 
     if (ctx) {
+#ifdef SDL_PLATFORM_WINDOWS
+        SDL_Switch2RumbleDestroy(ctx->rumble_transport);
+        ctx->rumble_transport = NULL;
+#endif
         if (ctx->interface_claimed) {
             ctx->libusb->release_interface(ctx->device_handle, ctx->interface_number);
             ctx->interface_claimed = false;
@@ -1304,6 +1425,7 @@ SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverSwitch2 = {
     .SetJoystickSensorsEnabled = HIDAPI_DriverSwitch2_SetJoystickSensorsEnabled,
     .CloseJoystick = HIDAPI_DriverSwitch2_CloseJoystick,
     .FreeDevice = HIDAPI_DriverSwitch2_FreeDevice,
+    .RumbleJoystickFrequenciesEx = HIDAPI_DriverSwitch2_RumbleJoystickFrequenciesEx,
 };
 
 #endif // SDL_JOYSTICK_HIDAPI_SWITCH2

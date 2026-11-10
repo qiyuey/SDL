@@ -31,6 +31,10 @@ extern SDL_Mutex *SDL_HIDAPI_rumble_lock;
 bool SDL_HIDAPI_LockRumble(void) SDL_TRY_ACQUIRE(true, SDL_HIDAPI_rumble_lock);
 bool SDL_HIDAPI_GetPendingRumbleLocked(SDL_HIDAPI_Device *device, Uint8 **data, int **size, int *maximum_size);
 int SDL_HIDAPI_SendRumbleAndUnlock(SDL_HIDAPI_Device *device, const Uint8 *data, int size) SDL_RELEASE(SDL_HIDAPI_rumble_lock);
+
+#define SDL_HIDAPI_RUMBLE_FAST_INTERVAL_MS 4
+// Latest-state output with a per-packet start-to-start period. Stops can bypass queued devices.
+int SDL_HIDAPI_SendRumbleLatestAndUnlock(SDL_HIDAPI_Device *device, const Uint8 *data, int size, Uint32 interval_ms, bool priority) SDL_RELEASE(SDL_HIDAPI_rumble_lock);
 typedef void (*SDL_HIDAPI_RumbleSentCallback)(void *userdata);
 int SDL_HIDAPI_SendRumbleWithCallbackAndUnlock(SDL_HIDAPI_Device *device, const Uint8 *data, int size, SDL_HIDAPI_RumbleSentCallback callback, void *userdata) SDL_RELEASE(SDL_HIDAPI_rumble_lock);
 void SDL_HIDAPI_UnlockRumble(void) SDL_RELEASE(SDL_HIDAPI_rumble_lock);

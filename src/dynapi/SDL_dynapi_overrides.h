@@ -787,6 +787,7 @@
 #define SDL_ResumeAudioStreamDevice SDL_ResumeAudioStreamDevice_REAL
 #define SDL_ResumeHaptic SDL_ResumeHaptic_REAL
 #define SDL_RumbleGamepad SDL_RumbleGamepad_REAL
+#define SDL_RumbleGamepadFrequenciesEx SDL_RumbleGamepadFrequenciesEx_REAL
 #define SDL_RumbleGamepadTriggers SDL_RumbleGamepadTriggers_REAL
 #define SDL_RumbleJoystick SDL_RumbleJoystick_REAL
 #define SDL_RumbleJoystickTriggers SDL_RumbleJoystickTriggers_REAL
