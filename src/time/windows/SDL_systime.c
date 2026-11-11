@@ -134,11 +134,18 @@ bool SDL_TimeToDateTime(SDL_Time ticks, SDL_DateTime *dt, bool localTime)
 
     if (FileTimeToSystemTime(&ft, &utc_st)) {
         if (localTime) {
-            if (SystemTimeToTzSpecificLocalTime(NULL, &utc_st, &local_st)) {
-                // Calculate the difference for the UTC offset.
-                SystemTimeToFileTime(&local_st, &local_ft);
-                const SDL_Time local_ticks = SDL_TimeFromWindows(local_ft.dwLowDateTime, local_ft.dwHighDateTime);
-                dt->utc_offset = (int)SDL_NS_TO_SECONDS(local_ticks - ticks);
+            if (SystemTimeToTzSpecificLocalTime(NULL, &utc_st, &local_st) &&
+                SystemTimeToFileTime(&local_st, &local_ft)) {
+                ULARGE_INTEGER utc_filetime, local_filetime;
+                utc_filetime.LowPart = ft.dwLowDateTime;
+                utc_filetime.HighPart = ft.dwHighDateTime;
+                local_filetime.LowPart = local_ft.dwLowDateTime;
+                local_filetime.HighPart = local_ft.dwHighDateTime;
+
+                // Compare whole seconds because SYSTEMTIME discards sub-millisecond precision.
+                const Sint64 utc_seconds = (Sint64)(utc_filetime.QuadPart / WINDOWS_TICK);
+                const Sint64 local_seconds = (Sint64)(local_filetime.QuadPart / WINDOWS_TICK);
+                dt->utc_offset = (int)(local_seconds - utc_seconds);
                 st = &local_st;
             }
         } else {
