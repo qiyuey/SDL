@@ -1177,6 +1177,14 @@ static void HIDAPI_UpdateDeviceList(void)
                     if(HIDAPI_SerialIsEmpty(device)) {
                         HIDAPI_SetDeviceSerialW(device, info->serial_number);
                     }
+#ifdef SDL_JOYSTICK_HIDAPI_SWITCH2
+                    // USB initialization can fail while the interface is still coming up.
+                    if (!device->driver && !device->is_bluetooth &&
+                        HIDAPI_GetDeviceDriver(device) == &SDL_HIDAPI_DriverSwitch2) {
+                        bool removed;
+                        HIDAPI_SetupDeviceDriver(device, &removed);
+                    }
+#endif
                 } else {
                     HIDAPI_AddDevice(info, 0, NULL);
                 }
@@ -1190,9 +1198,16 @@ check_removed:
     device = SDL_HIDAPI_devices;
     while (device) {
         SDL_HIDAPI_Device *next = device->next;
+        bool disconnected = (device->driver || device->children) &&
+                            device->num_joysticks == 0 && !device->dev;
+#ifdef SDL_JOYSTICK_HIDAPI_SWITCH2
+        // Switch 2 USB creates its joystick at initialization. After a read
+        // error, the old handle can still occupy the same path as a replug.
+        disconnected |= device->driver == &SDL_HIDAPI_DriverSwitch2 &&
+                        !device->is_bluetooth && device->num_joysticks == 0;
+#endif
 
-        if (!device->seen ||
-            ((device->driver || device->children) && device->num_joysticks == 0 && !device->dev)) {
+        if (!device->seen || disconnected) {
             if (device->parent) {
                 HIDAPI_DelDevice(device);
 
