@@ -1764,13 +1764,10 @@ static bool HIDAPI_DriverSwitch_ActuallyRumbleJoystick(SDL_DriverSwitch_Context 
     return true;
 }
 
-static Uint16 HIDAPI_DriverSwitch_EncodeFrequency(float frequency)
+static int HIDAPI_DriverSwitch_FrequencyIndex(float frequency, int minimum, int maximum)
 {
-    if (frequency <= 0.0f) {
-        return 0;
-    }
-    int encoded = (int)SDL_roundf(log2f(frequency / 10.0f) * 32.0f);
-    return (Uint16)SDL_clamp(encoded, 0, 0x1FF);
+    const float index = frequency > 0.0f ? log2f(frequency / 10.0f) * 32.0f : (float)minimum;
+    return (int)SDL_roundf(SDL_clamp(index, (float)minimum, (float)maximum));
 }
 
 static bool HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx(SDL_HIDAPI_Device *device, SDL_Joystick *joystick,
@@ -1788,10 +1785,11 @@ static bool HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx(SDL_HIDAPI_Device *d
     const Uint16 left_high_amp = (Uint16)(SDL_clamp(left_high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
     const Uint16 right_low_amp = (Uint16)(SDL_clamp(right_low_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
     const Uint16 right_high_amp = (Uint16)(SDL_clamp(right_high_amplitude, 0.0f, 1.0f) * SDL_MAX_UINT16);
-    const Uint16 left_low_freq = HIDAPI_DriverSwitch_EncodeFrequency(left_low_frequency);
-    const Uint16 left_high_freq = HIDAPI_DriverSwitch_EncodeFrequency(left_high_frequency);
-    const Uint16 right_low_freq = HIDAPI_DriverSwitch_EncodeFrequency(right_low_frequency);
-    const Uint16 right_high_freq = HIDAPI_DriverSwitch_EncodeFrequency(right_high_frequency);
+    // HD Rumble uses separate frequency ranges and bit layouts for each band.
+    const Uint8 left_low_freq = (Uint8)(HIDAPI_DriverSwitch_FrequencyIndex(left_low_frequency, 0x41, 0xBF) - 0x40);
+    const Uint16 left_high_freq = (Uint16)((HIDAPI_DriverSwitch_FrequencyIndex(left_high_frequency, 0x61, 0xBF + 0x20) - 0x60) * 4);
+    const Uint8 right_low_freq = (Uint8)(HIDAPI_DriverSwitch_FrequencyIndex(right_low_frequency, 0x41, 0xBF) - 0x40);
+    const Uint16 right_high_freq = (Uint16)((HIDAPI_DriverSwitch_FrequencyIndex(right_high_frequency, 0x61, 0xBF + 0x20) - 0x60) * 4);
 
     if (device->parent && ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConLeft) {
         EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
