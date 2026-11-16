@@ -2451,30 +2451,23 @@ static void BlitNtoNKeyCopyAlpha(SDL_BlitInfo *info)
     ckey &= rgbmask;
 
     // Fastpath: same source/destination format, with Amask, bpp 32, loop is vectorized. ~10x faster
-    if (srcfmt->format == dstfmt->format) {
-
-        if (srcfmt->format == SDL_PIXELFORMAT_ARGB8888 ||
-            srcfmt->format == SDL_PIXELFORMAT_ABGR8888 ||
-            srcfmt->format == SDL_PIXELFORMAT_BGRA8888 ||
-            srcfmt->format == SDL_PIXELFORMAT_RGBA8888) {
-
-            Uint32 *src32 = (Uint32 *)src;
-            Uint32 *dst32 = (Uint32 *)dst;
-            while (height--) {
-                /* *INDENT-OFF* */ // clang-format off
-                DUFFS_LOOP_TRIVIAL(
-                {
-                    if ((*src32 & rgbmask) != ckey) {
-                        *dst32 = *src32;
-                    }
-                    ++src32;
-                    ++dst32;
-                },
-                width);
-                /* *INDENT-ON* */ // clang-format on
-                src32 = (Uint32 *)((Uint8 *)src32 + srcskip);
-                dst32 = (Uint32 *)((Uint8 *)dst32 + dstskip);
-            }
+    if (srcfmt->format == dstfmt->format && srcbpp == 4) {
+        Uint32 *src32 = (Uint32 *)src;
+        Uint32 *dst32 = (Uint32 *)dst;
+        while (height--) {
+            /* *INDENT-OFF* */ // clang-format off
+            DUFFS_LOOP_TRIVIAL(
+            {
+                if ((*src32 & rgbmask) != ckey) {
+                    *dst32 = *src32;
+                }
+                ++src32;
+                ++dst32;
+            },
+            width);
+            /* *INDENT-ON* */ // clang-format on
+            src32 = (Uint32 *)((Uint8 *)src32 + srcskip);
+            dst32 = (Uint32 *)((Uint8 *)dst32 + dstskip);
         }
         return;
     }
@@ -3002,6 +2995,14 @@ static const struct blit_table normal_blit_2[] = {
       0, Blit_RGB565_RGBA8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
     { 0x0000F800, 0x000007E0, 0x0000001F, 4, 0x0000FF00, 0x00FF0000, 0xFF000000,
       0, Blit_RGB565_BGRA8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
+    { 0x0000001F, 0x000007E0, 0x0000F800, 4, 0x000000FF, 0x0000FF00, 0x00FF0000,
+      0, Blit_RGB565_ARGB8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
+    { 0x0000001F, 0x000007E0, 0x0000F800, 4, 0x00FF0000, 0x0000FF00, 0x000000FF,
+      0, Blit_RGB565_ABGR8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
+    { 0x0000001F, 0x000007E0, 0x0000F800, 4, 0x0000FF00, 0x00FF0000, 0xFF000000,
+      0, Blit_RGB565_RGBA8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
+    { 0x0000001F, 0x000007E0, 0x0000F800, 4, 0xFF000000, 0x00FF0000, 0x0000FF00,
+      0, Blit_RGB565_BGRA8888, NO_ALPHA | COPY_ALPHA | SET_ALPHA },
 #endif
     // Default for 16-bit RGB source, used if no other blitter matches
     { 0, 0, 0, 0, 0, 0, 0, 0, BlitNtoN, 0 }
@@ -3081,7 +3082,11 @@ static const struct blit_table normal_blit_4[] = {
     // RGB 888 and RGB 565
     { 0x00FF0000, 0x0000FF00, 0x000000FF, 2, 0x0000F800, 0x000007E0, 0x0000001F,
       0, Blit_XRGB8888_RGB565, NO_ALPHA },
+    { 0x000000FF, 0x0000FF00, 0x00FF0000, 2, 0x0000001F, 0x000007E0, 0x0000F800,
+      0, Blit_XRGB8888_RGB565, NO_ALPHA },
     { 0x00FF0000, 0x0000FF00, 0x000000FF, 2, 0x00007C00, 0x000003E0, 0x0000001F,
+      0, Blit_XRGB8888_RGB555, NO_ALPHA },
+    { 0x000000FF, 0x0000FF00, 0x00FF0000, 2, 0x0000001F, 0x000003E0, 0x00007C00,
       0, Blit_XRGB8888_RGB555, NO_ALPHA },
     // Default for 32-bit RGB source, used if no other blitter matches
     { 0, 0, 0, 0, 0, 0, 0, 0, BlitNtoN, 0 }
@@ -3139,7 +3144,7 @@ SDL_BlitFunc SDL_CalculateBlitN(SDL_Surface *surface)
 #ifdef SDL_SVE2_INTRINSICS
         if (SDL_HasSVE2()) {
             /* RGBA8888/ARGB8888/XRGB8888 -> RGB565 */
-            if (srcfmt->bytes_per_pixel == 4 &&
+            if (SDL_PIXELLAYOUT(srcfmt->format) == SDL_PACKEDLAYOUT_8888 &&
                 dstfmt->bytes_per_pixel == 2 &&
                 dstfmt->Rmask == 0x0000F800 &&
                 dstfmt->Gmask == 0x000007E0 &&
