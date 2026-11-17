@@ -1357,3 +1357,5 @@ SDL_DYNAPI_PROC(bool,SDL_SetRenderHDRHeadroom,(SDL_Renderer *a,float b),(a,b),re
 SDL_DYNAPI_PROC(bool,SDL_GetRenderHDRHeadroom,(SDL_Renderer *a,float *b),(a,b),return)
 SDL_DYNAPI_PROC(bool,SDL_RumbleGamepadFrequenciesEx,(SDL_Gamepad *a, float b, float c, float d, float e, float f, float g, float h, float i, Uint32 j),(a,b,c,d,e,f,g,h,i,j),return)
 SDL_DYNAPI_PROC(const char*,SDL_GetCurrentThreadName,(void),(),return)
+SDL_DYNAPI_PROC(SDL_Texture*,SDL_LoadTexture_IO,(SDL_Renderer *a,SDL_IOStream *b,bool c),(a,b,c),return)
+SDL_DYNAPI_PROC(SDL_Texture*,SDL_LoadTexture,(SDL_Renderer *a,const char *b),(a,b),return)

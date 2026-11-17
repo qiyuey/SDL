@@ -1400,13 +1400,13 @@ SDL_Renderer *SDL_CreateRendererWithProperties(SDL_PropertiesID props)
     renderer->render_command_generation = 1;
 
     if (renderer->software) {
-        // Software renderer always uses line method, for speed
+        // The software renderer prefers these, for speed
         renderer->line_method = SDL_RENDERLINEMETHOD_LINES;
+        renderer->scale_mode = SDL_SCALEMODE_NEAREST;
     } else {
         renderer->line_method = SDL_GetRenderLineMethod();
+        renderer->scale_mode = SDL_SCALEMODE_LINEAR;
     }
-
-    renderer->scale_mode = SDL_SCALEMODE_LINEAR;
 
     renderer->SDR_white_point = 1.0f;
     renderer->HDR_headroom = 1.0f;
@@ -6365,6 +6365,28 @@ bool SDL_GetDefaultTextureScaleMode(SDL_Renderer *renderer, SDL_ScaleMode *scale
         *scale_mode = renderer->scale_mode;
     }
     return true;
+}
+
+SDL_Texture *SDL_LoadTexture(SDL_Renderer *renderer, const char *file)
+{
+    SDL_Texture *texture = NULL;
+    SDL_Surface *surface = SDL_LoadSurface(file);
+    if (surface) {
+        texture = SDL_CreateTextureFromSurface(renderer, surface);
+        SDL_DestroySurface(surface);
+    }
+    return texture;
+}
+
+SDL_Texture *SDL_LoadTexture_IO(SDL_Renderer *renderer, SDL_IOStream *src, bool closeio)
+{
+    SDL_Texture *texture = NULL;
+    SDL_Surface *surface = SDL_LoadSurface_IO(src, closeio);
+    if (surface) {
+        texture = SDL_CreateTextureFromSurface(renderer, surface);
+        SDL_DestroySurface(surface);
+    }
+    return texture;
 }
 
 SDL_GPURenderState *SDL_CreateGPURenderState(SDL_Renderer *renderer, const SDL_GPURenderStateCreateInfo *createinfo)
