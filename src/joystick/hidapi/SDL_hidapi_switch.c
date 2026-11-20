@@ -321,6 +321,10 @@ typedef struct
     bool m_bRumblePending;
     bool m_bRumbleZeroPending;
     Uint32 m_unRumblePending;
+    SwitchRumbleData_t m_ProBluetoothRumblePending[2];
+    bool m_bProBluetoothRumbleRefresh;
+    SDL_SpinLock m_ProBluetoothRumbleClockLock;
+    Uint64 m_ulProBluetoothRumbleReadyNS;
     bool m_bSensorsSupported;
     bool m_bReportSensors;
     bool m_bHasSensorData;
@@ -487,6 +491,31 @@ static void ConstructSubcommand(SDL_DriverSwitch_Context *ctx, ESwitchSubcommand
     ctx->m_nCommandNumber = (ctx->m_nCommandNumber + 1) & 0xF;
 }
 
+static bool IsProBluetooth(const SDL_HIDAPI_Device *device)
+{
+    return device->is_bluetooth && device->vendor_id == USB_VENDOR_NINTENDO &&
+           device->product_id == USB_PRODUCT_NINTENDO_SWITCH_PRO;
+}
+
+static void SDLCALL ProBluetoothRumbleSent(void *userdata)
+{
+    SDL_DriverSwitch_Context *ctx = (SDL_DriverSwitch_Context *)userdata;
+    SDL_LockSpinlock(&ctx->m_ProBluetoothRumbleClockLock);
+    ctx->m_ulProBluetoothRumbleReadyNS = SDL_GetTicksNS() + SDL_MS_TO_NS(RUMBLE_WRITE_FREQUENCY_MS);
+    SDL_UnlockSpinlock(&ctx->m_ProBluetoothRumbleClockLock);
+}
+
+static bool ProBluetoothRumbleReady(SDL_DriverSwitch_Context *ctx)
+{
+    if (SDL_GetAtomicInt(&ctx->device->rumble_pending) > 0) {
+        return false;
+    }
+    SDL_LockSpinlock(&ctx->m_ProBluetoothRumbleClockLock);
+    const Uint64 ready = ctx->m_ulProBluetoothRumbleReadyNS;
+    SDL_UnlockSpinlock(&ctx->m_ProBluetoothRumbleClockLock);
+    return SDL_GetTicksNS() >= ready;
+}
+
 static bool WritePacket(SDL_DriverSwitch_Context *ctx, void *pBuf, Uint8 ucLen)
 {
     Uint8 rgucBuf[k_unSwitchMaxOutputPacketLength];
@@ -502,8 +531,19 @@ static bool WritePacket(SDL_DriverSwitch_Context *ctx, void *pBuf, Uint8 ucLen)
         pBuf = rgucBuf;
         ucLen = (Uint8)unWriteSize;
     }
+    const bool paced_rumble = IsProBluetooth(ctx->device) &&
+                              *(const Uint8 *)pBuf == k_eSwitchOutputReportIDs_Rumble;
     if (ctx->m_bSyncWrite) {
-        return SDL_hid_write(ctx->device->dev, (Uint8 *)pBuf, ucLen) >= 0;
+        const bool written = SDL_hid_write(ctx->device->dev, (Uint8 *)pBuf, ucLen) >= 0;
+        if (paced_rumble) {
+            ProBluetoothRumbleSent(ctx);
+        }
+        return written;
+    } else if (paced_rumble) {
+        if (!SDL_HIDAPI_LockRumble()) {
+            return false;
+        }
+        return SDL_HIDAPI_SendRumbleWithCallbackAndUnlock(ctx->device, pBuf, ucLen, ProBluetoothRumbleSent, ctx) >= 0;
     } else {
         return WriteOutput(ctx, (Uint8 *)pBuf, ucLen) >= 0;
     }
@@ -1746,6 +1786,58 @@ static bool HIDAPI_DriverSwitch_OpenJoystick(SDL_HIDAPI_Device *device, SDL_Joys
     return true;
 }
 
+static bool SendProBluetoothRumble(SDL_DriverSwitch_Context *ctx)
+{
+    if (!ProBluetoothRumbleReady(ctx)) {
+        return true;
+    }
+
+    SwitchRumbleData_t data[2];
+    bool refresh;
+    if (ctx->m_bRumbleZeroPending) {
+        SetNeutralRumble(ctx->device, &data[0]);
+        SetNeutralRumble(ctx->device, &data[1]);
+        refresh = false;
+    } else if (ctx->m_bRumblePending) {
+        SDL_memcpy(data, ctx->m_ProBluetoothRumblePending, sizeof(data));
+        refresh = ctx->m_bProBluetoothRumbleRefresh;
+    } else {
+        return true;
+    }
+
+    SwitchRumbleData_t previous[2];
+    SDL_memcpy(previous, ctx->m_RumblePacket.rumbleData, sizeof(previous));
+    SDL_memcpy(ctx->m_RumblePacket.rumbleData, data, sizeof(data));
+    if (!WriteRumble(ctx)) {
+        SDL_memcpy(ctx->m_RumblePacket.rumbleData, previous, sizeof(previous));
+        return SDL_SetError("Couldn't send rumble packet");
+    }
+    ctx->m_bRumbleActive = refresh;
+    if (ctx->m_bRumbleZeroPending) {
+        ctx->m_bRumbleZeroPending = false;
+    } else {
+        ctx->m_bRumblePending = false;
+    }
+    return true;
+}
+
+static bool QueueProBluetoothRumble(SDL_DriverSwitch_Context *ctx, const SwitchRumbleData_t data[2], bool refresh)
+{
+    SwitchRumbleData_t neutral[2];
+    SetNeutralRumble(ctx->device, &neutral[0]);
+    SetNeutralRumble(ctx->device, &neutral[1]);
+    if (SDL_memcmp(data, neutral, sizeof(neutral)) == 0) {
+        // A stop supersedes older effects, but a newer effect cannot replace the stop.
+        ctx->m_bRumblePending = false;
+        ctx->m_bRumbleZeroPending = SDL_memcmp(ctx->m_RumblePacket.rumbleData, neutral, sizeof(neutral)) != 0;
+    } else {
+        SDL_memcpy(ctx->m_ProBluetoothRumblePending, data, sizeof(ctx->m_ProBluetoothRumblePending));
+        ctx->m_bProBluetoothRumbleRefresh = refresh;
+        ctx->m_bRumblePending = true;
+    }
+    return SendProBluetoothRumble(ctx);
+}
+
 static bool HIDAPI_DriverSwitch_ActuallyRumbleJoystick(SDL_DriverSwitch_Context *ctx, Uint16 low_frequency_rumble, Uint16 high_frequency_rumble)
 {
     /* Experimentally determined rumble values. These will only matter on some controllers as tested ones
@@ -1759,15 +1851,21 @@ static bool HIDAPI_DriverSwitch_ActuallyRumbleJoystick(SDL_DriverSwitch_Context 
     const Uint8 k_ucLowFreq = 0x3D;
     const Uint16 k_usLowFreqAmp = EncodeRumbleLowAmplitude(low_frequency_rumble);
 
-    if (low_frequency_rumble || high_frequency_rumble) {
-        EncodeRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[0], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
-        EncodeRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[1], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
+    SwitchRumbleData_t data[2];
+    const bool active = low_frequency_rumble || high_frequency_rumble;
+    if (active) {
+        EncodeRumble(ctx->device, &data[0], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
+        EncodeRumble(ctx->device, &data[1], k_usHighFreq, k_ucHighFreqAmp, k_ucLowFreq, k_usLowFreqAmp);
     } else {
-        SetNeutralRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[0]);
-        SetNeutralRumble(ctx->device, &ctx->m_RumblePacket.rumbleData[1]);
+        SetNeutralRumble(ctx->device, &data[0]);
+        SetNeutralRumble(ctx->device, &data[1]);
     }
 
-    ctx->m_bRumbleActive = (low_frequency_rumble || high_frequency_rumble);
+    if (IsProBluetooth(ctx->device)) {
+        return QueueProBluetoothRumble(ctx, data, active);
+    }
+    SDL_memcpy(ctx->m_RumblePacket.rumbleData, data, sizeof(data));
+    ctx->m_bRumbleActive = active;
 
     if (!WriteRumble(ctx)) {
         return SDL_SetError("Couldn't send rumble packet");
@@ -1802,23 +1900,30 @@ static bool HIDAPI_DriverSwitch_RumbleJoystickFrequenciesEx(SDL_HIDAPI_Device *d
     const Uint8 right_low_freq = (Uint8)(HIDAPI_DriverSwitch_FrequencyIndex(right_low_frequency, 0x41, 0xBF) - 0x40);
     const Uint16 right_high_freq = (Uint16)((HIDAPI_DriverSwitch_FrequencyIndex(right_high_frequency, 0x61, 0xBF + 0x20) - 0x60) * 4);
 
+    SwitchRumbleData_t data[2];
+    bool active;
     if (device->parent && ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConLeft) {
-        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
+        EncodeRumble(device, &data[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
                      (Uint8)left_low_freq, EncodeRumbleLowAmplitude(left_low_amp));
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[1]);
-        ctx->m_bRumbleActive = (left_low_amp || left_high_amp);
+        SetNeutralRumble(device, &data[1]);
+        active = (left_low_amp || left_high_amp);
     } else if (device->parent && ctx->m_eControllerType == k_eSwitchDeviceInfoControllerType_JoyConRight) {
-        SetNeutralRumble(device, &ctx->m_RumblePacket.rumbleData[0]);
-        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
+        SetNeutralRumble(device, &data[0]);
+        EncodeRumble(device, &data[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
                      (Uint8)right_low_freq, EncodeRumbleLowAmplitude(right_low_amp));
-        ctx->m_bRumbleActive = (right_low_amp || right_high_amp);
+        active = (right_low_amp || right_high_amp);
     } else {
-        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
+        EncodeRumble(device, &data[0], left_high_freq, EncodeRumbleHighAmplitude(left_high_amp),
                      (Uint8)left_low_freq, EncodeRumbleLowAmplitude(left_low_amp));
-        EncodeRumble(device, &ctx->m_RumblePacket.rumbleData[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
+        EncodeRumble(device, &data[1], right_high_freq, EncodeRumbleHighAmplitude(right_high_amp),
                      (Uint8)right_low_freq, EncodeRumbleLowAmplitude(right_low_amp));
-        ctx->m_bRumbleActive = (left_low_amp || left_high_amp || right_low_amp || right_high_amp);
+        active = (left_low_amp || left_high_amp || right_low_amp || right_high_amp);
     }
+    if (IsProBluetooth(device)) {
+        return QueueProBluetoothRumble(ctx, data, active);
+    }
+    SDL_memcpy(ctx->m_RumblePacket.rumbleData, data, sizeof(data));
+    ctx->m_bRumbleActive = active;
     return WriteRumble(ctx);
 }
 
@@ -1869,6 +1974,10 @@ static bool HIDAPI_DriverSwitch_RumbleJoystick(SDL_HIDAPI_Device *device, SDL_Jo
             // Just handle high frequency rumble
             low_frequency_rumble = 0;
         }
+    }
+
+    if (IsProBluetooth(device)) {
+        return HIDAPI_DriverSwitch_ActuallyRumbleJoystick(ctx, low_frequency_rumble, high_frequency_rumble);
     }
 
     if (ctx->m_bRumblePending) {
@@ -1952,6 +2061,10 @@ static bool HIDAPI_DriverSwitch_SendJoystickEffect(SDL_HIDAPI_Device *device, SD
 
         if (packet->ucPacketType != k_eSwitchOutputReportIDs_Rumble) {
             return SDL_SetError("Unknown Nintendo Switch Pro effect type");
+        }
+
+        if (IsProBluetooth(device)) {
+            return QueueProBluetoothRumble(ctx, packet->rumbleData, ctx->m_bRumbleActive);
         }
 
         SDL_copyp(&ctx->m_RumblePacket.rumbleData[0], &packet->rumbleData[0]);
@@ -2932,10 +3045,16 @@ static bool HIDAPI_DriverSwitch_UpdateDevice(SDL_HIDAPI_Device *device)
             }
         }
 
+        const bool paced = IsProBluetooth(device);
         if (ctx->m_bRumblePending || ctx->m_bRumbleZeroPending) {
-            HIDAPI_DriverSwitch_SendPendingRumble(ctx);
+            if (paced) {
+                SendProBluetoothRumble(ctx);
+            } else {
+                HIDAPI_DriverSwitch_SendPendingRumble(ctx);
+            }
         } else if (ctx->m_bRumbleActive &&
-                   now >= (ctx->m_ulRumbleSent + RUMBLE_REFRESH_FREQUENCY_MS)) {
+                   now >= (ctx->m_ulRumbleSent + RUMBLE_REFRESH_FREQUENCY_MS) &&
+                   (!paced || ProBluetoothRumbleReady(ctx))) {
 #ifdef DEBUG_RUMBLE
             SDL_Log("Sent continuing rumble, %d ms after previous rumble", now - ctx->m_ulRumbleSent);
 #endif
@@ -2964,6 +3083,29 @@ static bool HIDAPI_DriverSwitch_UpdateDevice(SDL_HIDAPI_Device *device)
 static void HIDAPI_DriverSwitch_CloseJoystick(SDL_HIDAPI_Device *device, SDL_Joystick *joystick)
 {
     SDL_DriverSwitch_Context *ctx = (SDL_DriverSwitch_Context *)device->context;
+
+    if (IsProBluetooth(device) && !ctx->m_bInputOnly) {
+        SwitchRumbleData_t neutral[2];
+        SetNeutralRumble(device, &neutral[0]);
+        SetNeutralRumble(device, &neutral[1]);
+        ctx->m_bRumblePending = false;
+        if (joystick->attached && device->dev &&
+            SDL_memcmp(ctx->m_RumblePacket.rumbleData, neutral, sizeof(neutral)) != 0) {
+            // Close may be followed immediately by SDL_Quit, so finish a stop
+            // here rather than depending on another device update.
+            const Uint64 end = SDL_GetTicksNS() + SDL_MS_TO_NS(2 * RUMBLE_WRITE_FREQUENCY_MS);
+            while (!ProBluetoothRumbleReady(ctx) && SDL_GetTicksNS() < end) {
+                SDL_Delay(1);
+            }
+            const bool was_sync = ctx->m_bSyncWrite;
+            ctx->m_bSyncWrite = true;
+            QueueProBluetoothRumble(ctx, neutral, false);
+            ctx->m_bSyncWrite = was_sync;
+        }
+        SDL_memcpy(ctx->m_RumblePacket.rumbleData, neutral, sizeof(neutral));
+        ctx->m_bRumbleActive = false;
+        ctx->m_bRumbleZeroPending = false;
+    }
 
     if (!ctx->m_bInputOnly) {
         // Restore simple input mode for other applications
